@@ -177,7 +177,7 @@ export default function VoiceIntake() {
                                              setChat((p) => [...p, { role: "ai", text: reply, id: Date.now() + Math.random() }]);
                                              chatRef2.current = [...chatRef2.current, { role: "ai", text: reply }];
 
-            if (aiData.action === "clarify" || aiData.action === "conversational") {
+            if (aiData.action === "clarify" || aiData.action === "conversational" || aiData.action === "correct") {
                         if (voiceOnRef.current) {
                                       setIsSpeaking(true);
                                       await speakEL(reply);
