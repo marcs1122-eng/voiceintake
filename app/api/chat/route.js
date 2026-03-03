@@ -1,67 +1,166 @@
 export async function POST(request) {
-    const { message, currentQuestion, currentField, allResponses, chatHistory, flowQuestions } = await request.json();
+  var body = await request.json();
+  var message = body.message;
+  var currentQuestion = body.currentQuestion;
+  var currentField = body.currentField;
+  var allResponses = body.allResponses || {};
+  var chatHistory = body.chatHistory || [];
+  var flowQuestions = body.flowQuestions || [];
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-          return new Response(JSON.stringify({ error: "No Anthropic API key configured" }), {
-                  status: 500,
-                  headers: { "Content-Type": "application/json" },
-          });
+  var apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return new Response(JSON.stringify({ error: "No API key" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" }
+    });
+  }
+
+  var responseSummary = Object.entries(allResponses)
+    .map(function(e) { return e[0] + ": " + e[1]; })
+    .join("\n");
+
+  var qList = flowQuestions.map(function(q, i) {
+    return (i + 1) + ". [" + q.f + "] " + q.q;
+  }).join("\n");
+
+  var systemPrompt = [
+    "You are a friendly medical intake assistant for Global Neuro & Spine Institute.",
+    "You are having a natural voice conversation with a patient.",
+    "",
+    "CURRENT FIELD: " + (currentField || "none"),
+    "CURRENT QUESTION: " + (currentQuestion || "none"),
+    "",
+    "DATA COLLECTED SO FAR:",
+    responseSummary || "(nothing yet)",
+    "",
+    "REMAINING QUESTIONS:",
+    qList || "(none)",
+    "",
+    "INSTRUCTIONS:",
+    "Analyze the patient message and respond with ONLY a JSON object.",
+    "",
+    "DETECTING CORRECTIONS (THIS IS CRITICAL):",
+    "If the patient says ANYTHING like:",
+    "- \"you spelled my name wrong\"",
+    "- \"that is not right\"",
+    "- \"no, my name is...\"",
+    "- \"actually it is...\"",
+    "- \"you got that wrong\"",
+    "- \"that is not what I said\"",
+    "- \"go back\"",
+    "- \"let me correct that\"",
+    "- \"wrong\"",
+    "- \"not correct\"",
+    "- \"misspelled\"",
+    "- \"spelled wrong\"",
+    "Then the action MUST be \"correct\" or \"clarify\".",
+    "If they tell you what the correct value is, use \"correct\" and include the fix in updates.",
+    "If they just say it is wrong but do NOT give the correct value, use \"clarify\" and ASK them for the correct value.",
+    "NEVER use \"accept\" when the patient is complaining about an error.",
+    "",
+    "SPELLING OUT LETTERS:",
+    "If someone spells letter by letter like M-A-R-C or M A R C, assemble into: Marc",
+    "",
+    "JSON FORMAT (respond with ONLY this, no other text):",
+    "{",
+    "  \"action\": \"accept\" or \"correct\" or \"clarify\" or \"multi\" or \"conversational\",",
+    "  \"updates\": { \"field_name\": \"value\" } or {},",
+    "  \"reply\": \"Your spoken response\",",
+    "  \"moveToField\": \"next_field_name\" or null",
+    "}",
+    "",
+    "ACTION DEFINITIONS:",
+    "- accept: Patient answered the current question. Put answer in updates with current field. moveToField = null (auto-advance).",
+    "- correct: Patient is FIXING a previous answer. Put corrected field and value in updates. moveToField = null (STAY on current question, do NOT advance).",
+    "- clarify: Patient needs help or you need more info. No updates. Ask them again. moveToField = null.",
+    "- multi: Patient answered several questions at once. Put all in updates. Set moveToField to the next unanswered field name.",
+    "- conversational: Off-topic chat. No updates. Reply and re-ask current question.",
+    "",
+    "IMPORTANT:",
+    "- Reply must sound natural and warm, like a real person talking.",
+    "- Keep replies SHORT (1-2 sentences) since they are spoken aloud.",
+    "- If correcting, say something like \"Oh sorry about that! I have fixed it to [value]. Now, [re-ask current question].\"",
+    "- Use the patient name if you know it.",
+    "- Respond with ONLY the JSON. No markdown, no backticks, no extra text."
+  ].join("\n");
+
+  var claudeMessages = [];
+  var hist = chatHistory.slice(-10);
+  for (var i = 0; i < hist.length; i++) {
+    var m = hist[i];
+    var role = m.role === "user" ? "user" : "assistant";
+    if (claudeMessages.length > 0 && claudeMessages[claudeMessages.length - 1].role === role) {
+      claudeMessages[claudeMessages.length - 1].content += "\n" + m.text;
+    } else {
+      claudeMessages.push({ role: role, content: m.text });
     }
-
-  const responseSummary = Object.entries(allResponses || {})
-      .map(function(entry) { return entry[0] + ": " + entry[1]; })
-      .join("\n");
-
-  const recentChat = (chatHistory || []).slice(-10).map(function(m) {
-        return (m.role === "user" ? "Patient" : "Assistant") + ": " + m.text;
-  }).join("\n");
-
-  var qList = (flowQuestions || []).map(function(q, i) {
-        return (i + 1) + ". [" + q.f + "] " + q.q;
-  }).join("\n");
-
-  var systemPrompt = "You are a friendly, warm medical intake assistant for Global Neuro & Spine Institute. You are having a natural voice conversation with a patient to collect their intake information.\n\nCURRENT STATE:\n- Current question being asked: \"" + (currentQuestion || "none") + "\"\n- Current field to fill: \"" + (currentField || "none") + "\"\n- Data collected so far:\n" + (responseSummary || "Nothing yet") + "\n\nRECENT CONVERSATION:\n" + (recentChat || "Just started") + "\n\nREMAINING QUESTIONS TO ASK (in order):\n" + qList + "\n\nYOUR JOB:\nAnalyze the patient's message and determine what to do. You must respond with valid JSON only.\n\nRULES FOR UNDERSTANDING THE PATIENT:\n1. CORRECTIONS: If the patient says things like \"that's wrong\", \"no my name is spelled...\", \"go back\", \"I said...\", \"actually it's...\", \"not right\", \"you got that wrong\", \"let me correct that\", \"that's not what I said\" they are trying to fix a previous answer. Figure out WHICH field they want to correct from context. If they say \"my name is spelled M-A-R-C\" after giving their name, the corrected field is \"full_name\" and the value is \"Marc\" (assemble spelled letters into the name).\n2. SPELLING: If the patient spells something out letter by letter (like \"M-A-R-C-O-S\" or \"M A R C O S\" or \"capital M, a, r, c\"), assemble the letters into the correct word/name.\n3. CLARIFICATIONS: If the patient asks \"what do you mean?\" or \"can you repeat that?\", re-ask the current question in different words.\n4. MULTI-PART ANSWERS: If the patient gives info that answers multiple questions at once (like \"My name is John Smith, born January 5 1980\"), extract all the answers.\n5. CONVERSATIONAL: If the patient says something conversational like \"hello\" or \"how are you\", respond naturally but guide them back to the current question.\n6. NORMAL ANSWER: If the patient simply answers the current question, accept it and move on.\n7. YES/NO INTERPRETATION: For yes/no questions, interpret \"yeah\", \"yep\", \"sure\", \"nah\", \"nope\", \"not really\" etc. as Yes or No.\n8. SCALE INTERPRETATION: For pain scale questions, extract the number. \"about a 7\" = \"7\", \"maybe 8 or 9\" = \"8\".\n\nRESPOND WITH THIS EXACT JSON FORMAT:\n{\n  \"action\": \"accept\" | \"correct\" | \"clarify\" | \"multi\" | \"conversational\",\n  \"updates\": { \"field_name\": \"value\" },\n  \"reply\": \"Your natural spoken response to the patient\",\n  \"moveToField\": \"field_name_to_go_to_next_or_null\"\n}\n\n- \"accept\": patient answered the current question normally. Put the answer in updates with the current field name.\n- \"correct\": patient is correcting a previous answer. Put the corrected field+value in updates. Set moveToField to null to stay on current question.\n- \"clarify\": patient needs the question repeated or explained. No updates. Reply with a rephrased question.\n- \"multi\": patient answered multiple questions at once. Put ALL extracted answers in updates. Set moveToField to the next unanswered field.\n- \"conversational\": patient said something off-topic. No updates. Reply naturally and re-ask the current question.\n\nIMPORTANT: Your \"reply\" should sound like a real person talking. Warm, brief, natural. Use the patient's name if you know it. Acknowledge corrections gracefully (\"Oh sorry about that! I have updated your name to Marc.\"). Keep it concise since this will be spoken aloud.\n\nRespond ONLY with the JSON object. No other text.";
+  }
+  if (claudeMessages.length === 0 || claudeMessages[claudeMessages.length - 1].role !== "user") {
+    claudeMessages.push({ role: "user", content: message });
+  } else {
+    claudeMessages[claudeMessages.length - 1].content += "\n" + message;
+  }
+  if (claudeMessages.length > 0 && claudeMessages[0].role !== "user") {
+    claudeMessages.shift();
+  }
 
   try {
-        var response = await fetch("https://api.anthropic.com/v1/messages", {
-                method: "POST",
-                headers: {
-                          "Content-Type": "application/json",
-                          "x-api-key": apiKey,
-                          "anthropic-version": "2023-06-01"
-                },
-                body: JSON.stringify({
-                          model: "claude-sonnet-4-20250514",
-                          max_tokens: 500,
-                          system: systemPrompt,
-                          messages: [
-                            { role: "user", content: message }
-                                    ]
-                }),
-        });
+    var response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01"
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 500,
+        system: systemPrompt,
+        messages: claudeMessages
+      })
+    });
 
-      if (!response.ok) {
-              var err = await response.text();
-              console.error("Anthropic error:", err);
-              return new Response(JSON.stringify({ error: "AI processing failed" }), {
-                        status: 500,
-                        headers: { "Content-Type": "application/json" },
-              });
-      }
-
-      var data = await response.json();
-        var content = data.content[0].text;
-        var parsed = JSON.parse(content);
-
-      return new Response(JSON.stringify(parsed), {
-              headers: { "Content-Type": "application/json" },
+    if (!response.ok) {
+      var errText = await response.text();
+      console.error("Anthropic error:", errText);
+      return new Response(JSON.stringify({ error: "AI failed: " + response.status }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" }
       });
+    }
+
+    var data = await response.json();
+    var content = data.content[0].text.trim();
+
+    if (content.startsWith("```")) {
+      content = content.replace(/^```json?\n?/, "").replace(/\n?```$/, "").trim();
+    }
+
+    var parsed;
+    try {
+      parsed = JSON.parse(content);
+    } catch (pe) {
+      console.error("JSON parse error:", content);
+      var jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        parsed = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error("Could not parse AI response as JSON");
+      }
+    }
+
+    if (!parsed.action) parsed.action = "accept";
+    if (!parsed.updates) parsed.updates = {};
+    if (!parsed.reply) parsed.reply = "Got it.";
+
+    return new Response(JSON.stringify(parsed), {
+      headers: { "Content-Type": "application/json" }
+    });
   } catch (e) {
-        console.error("Chat API error:", e);
-        return new Response(JSON.stringify({ error: "Failed to process message" }), {
-                status: 500,
-                headers: { "Content-Type": "application/json" },
-        });
+    console.error("Chat route error:", e);
+    return new Response(JSON.stringify({ error: "Failed: " + e.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" }
+    });
   }
 }
