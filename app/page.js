@@ -111,7 +111,7 @@ export default function VoiceIntake() {
       const cur = ai < flow.length ? flow[ai] : null;
       const prog = flow.length ? Math.min((ai / flow.length) * 100, 100) : 0;
 
-  useEffect(() => { chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight, behavior: "smooth" }); }, [chat]);
+  useEffect(() => { setTimeout(function() { chatRef.current?.scrollTo({ top: chatRef.current.scrollHeight, behavior: "smooth" }); }, 50); }, [chat, isThinking, isSpeaking, isListening, interim]);
 
   const stopL = useCallback(() => {
           try { recRef.current?.abort(); } catch (e) {}
@@ -124,7 +124,7 @@ export default function VoiceIntake() {
   }, [flow]);
 
   const doSubmit = useCallback(async (v) => {
-          if (!v || busyRef.current) return;
+          if (!v) return; if (busyRef.current) { window.speechSynthesis?.cancel(); try { var audios = document.querySelectorAll("audio"); audios.forEach(function(a) { a.pause(); a.currentTime = 0; }); } catch(e) {} busyRef.current = false; setIsSpeaking(false); }
           clearTimeout(timerRef.current);
           pendingRef.current = "";
           stopL(); setInput(""); setInterim("");
@@ -255,7 +255,7 @@ export default function VoiceIntake() {
           const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
           if (!SR) return;
           stopL(); pendingRef.current = "";
-          const r = new SR(); r.continuous = false; r.interimResults = true; r.lang = "en-US";
+          const r = new SR(); r.continuous = true; r.interimResults = true; r.lang = "en-US";
           r.onstart = () => setIsListening(true);
           r.onresult = (e) => {
                     let f = "", n = "";
@@ -271,7 +271,7 @@ export default function VoiceIntake() {
                                                               const s = pendingRef.current.trim(); pendingRef.current = "";
                                                               if (doSubmitRef.current) doSubmitRef.current(s);
                                               }
-                                }, 1400);
+                                }, 3500);
                     } else setInterim(n);
           };
           r.onerror = () => stopL();
@@ -357,7 +357,7 @@ export default function VoiceIntake() {
       )}
       <div style={{padding:"10px 16px 16px",background:c.card,borderTop:"1px solid "+c.border}}>
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
-          <button onClick={()=>{if(isListening)stopL();else startL()}} disabled={isSpeaking||isThinking} style={{width:48,height:48,borderRadius:"50%",border:"none",background:isListening?"linear-gradient(135deg,#EF4444,#DC2626)":"linear-gradient(135deg,#3B82F6,#2563EB)",color:"#fff",cursor:(isSpeaking||isThinking)?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",opacity:(isSpeaking||isThinking)?0.4:1}}>
+          <button onClick={()=>{if(isListening)stopL();else startL()}} disabled={isThinking} style={{width:48,height:48,borderRadius:"50%",border:"none",background:isListening?"linear-gradient(135deg,#EF4444,#DC2626)":"linear-gradient(135deg,#3B82F6,#2563EB)",color:"#fff",cursor:isThinking?"not-allowed":"pointer",display:"flex",alignItems:"center",justifyContent:"center",opacity:isThinking?0.4:1}}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
           </button>
           <input type="text" value={input} onChange={(e)=>setInput(e.target.value)} onKeyDown={(e)=>e.key==="Enter"&&handleSubmit()} placeholder={isListening?"Listening...":"Type or tap mic..."} style={{flex:1,padding:"12px 16px",fontSize:14,background:c.surf,color:c.txt,border:"1px solid "+c.border,borderRadius:12,outline:"none"}}/>
