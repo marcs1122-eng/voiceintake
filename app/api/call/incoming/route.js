@@ -18,7 +18,7 @@ export async function POST(request) {
 
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="Polly.Joanna" rate="90%">${escapeXml(greeting)}</Say>
+  <Say voice="Polly.Joanna-Neural" rate="90%">${escapeXml(greeting)}</Say>
   <Gather
     input="speech"
     action="${baseUrl}/api/call/respond?flow=${flowType}"
@@ -30,7 +30,7 @@ export async function POST(request) {
     timeout="12"
   >
   </Gather>
-  <Say voice="Polly.Joanna" rate="90%">I did not catch that. What is your full name?</Say>
+  <Say voice="Polly.Joanna-Neural" rate="90%">I did not catch that. What is your full name?</Say>
   <Gather
     input="speech"
     action="${baseUrl}/api/call/respond?flow=${flowType}"
@@ -42,7 +42,7 @@ export async function POST(request) {
     timeout="12"
   >
   </Gather>
-  <Say voice="Polly.Joanna">I am having trouble hearing you. Please try calling back. Goodbye.</Say>
+  <Say voice="Polly.Joanna-Neural">I am having trouble hearing you. Please try calling back. Goodbye.</Say>
   <Hangup/>
 </Response>`;
 
