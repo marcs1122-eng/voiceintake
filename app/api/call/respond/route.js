@@ -17,7 +17,7 @@ const NEW_PATIENT_QUESTIONS = [
   { field: 'cause', question: 'Was your pain caused by an auto accident, a slip and fall, or something else?' },
   { field: 'pain_loc', question: 'Where exactly is your pain located?' },
   { field: 'pain_rad', question: 'Does your pain travel anywhere, like down your arm or leg?' },
-  { field: 'pain_worse', question: 'What makes your pain worse?' },h
+  { field: 'pain_worse', question: 'What makes your pain worse?' },
   { field: 'pain_better', question: 'What makes your pain better?' },
   { field: 'pain_desc', question: 'How would you describe your pain? Sharp, burning, shooting, achy, or pressure?' },
   { field: 'pain_sev', question: 'On a scale of 0 to 10, what is your pain level right now?' },
