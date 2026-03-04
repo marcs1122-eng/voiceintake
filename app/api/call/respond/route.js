@@ -17,7 +17,7 @@ const NEW_PATIENT_QUESTIONS = [
   { field: 'cause', question: 'Was your pain caused by an auto accident, a slip and fall, or something else?' },
   { field: 'pain_loc', question: 'Where exactly is your pain located?' },
   { field: 'pain_rad', question: 'Does your pain travel anywhere, like down your arm or leg?' },
-  { field: 'pain_worse', question: 'What makes your pain worse?' },
+  { field: 'pain_worse', question: 'What makes your pain worse?' },h
   { field: 'pain_better', question: 'What makes your pain better?' },
   { field: 'pain_desc', question: 'How would you describe your pain? Sharp, burning, shooting, achy, or pressure?' },
   { field: 'pain_sev', question: 'On a scale of 0 to 10, what is your pain level right now?' },
@@ -210,7 +210,7 @@ Reply ONLY with valid JSON, no markdown, no backticks:
 {"action":"advance","updates":{"field":"value"},"reply":"spoken reply","skipTo":null}`;
 
   const response = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
+    model: 'claude-sonnet-4-6',
     max_tokens: 200,
     system: systemPrompt,
     messages: [
