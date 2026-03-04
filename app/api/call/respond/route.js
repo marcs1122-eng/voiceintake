@@ -5,6 +5,8 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const NEW_PATIENT_QUESTIONS = [
   { field: 'full_name', question: 'What is your full name?' },
+  { field: 'name_spelling', question: 'Thank you! Can you spell your first and last name for me?' },
+  { field: 'name_confirm', question: 'Let me make sure I have that right. I will read back your name and spelling — please confirm if it is correct or let me know any corrections.' },
   { field: 'dob', question: 'What is your date of birth?' },
   { field: 'height', question: 'What is your height?' },
   { field: 'weight', question: 'What is your weight?' },
@@ -177,12 +179,18 @@ CRITICAL RULES:
 9. Sound natural — avoid "I understand", "Great!", "Certainly!" — those sound robotic.
 10. Speak as if talking to an elderly patient — clear, warm, patient, no jargon.
 
+SPECIAL FIELD HANDLING:
+- If current field is "name_spelling": Patient will spell out their name letter by letter or say it. Capture the spelling exactly. Then in your reply, read it back formatted like: "Let me make sure I have that right. Your name is [full name], first name spelled [F-I-R-S-T], last name spelled [L-A-S-T]. Is that correct?"
+- If current field is "name_confirm": Patient will say yes/correct or give a correction. If correct, advance. If they correct anything, update full_name and name_spelling, stay and read back the corrected version for re-confirmation. Only advance once they confirm it is correct.
+
 CURRENT STATE:
 - Visit type: ${session.flowType === 'followup' ? 'Follow-up visit' : 'New patient visit'}
 - Current field: ${currentQ?.field}
 - Current question: "${currentQ?.question}"
 - Next question: "${nextQ?.question || 'This is the last question. Thank the patient warmly and let them know they are all done.'}"
 - Fields collected so far: ${Object.keys(session.allResponses).join(', ') || 'none yet'}
+- Full name collected: ${session.allResponses['full_name'] || 'not yet'}
+- Name spelling collected: ${session.allResponses['name_spelling'] || 'not yet'}
 
 Respond ONLY with valid JSON — no markdown, no backticks, nothing else:
 {"action":"advance","updates":{"field_name":"value"},"reply":"your spoken reply here","skipTo":null}`;
