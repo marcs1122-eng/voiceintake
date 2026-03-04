@@ -144,9 +144,9 @@ export async function POST(request) {
 
     const doneTwiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="Polly.Joanna" rate="90%">${escapeXml(reply)}</Say>
+  <Say voice="Polly.Joanna-Neural" rate="90%">${escapeXml(reply)}</Say>
   <Pause length="1"/>
-  <Say voice="Polly.Joanna" rate="90%">Your intake is now complete. Thank you so much for your time. Our clinical team will review your information before your appointment. Have a great day and goodbye!</Say>
+  <Say voice="Polly.Joanna-Neural" rate="90%">Your intake is now complete. Thank you so much for your time. Our clinical team will review your information before your appointment. Have a great day and goodbye!</Say>
 </Response>`;
     return new NextResponse(doneTwiml, { headers: { 'Content-Type': 'text/xml' } });
   }
@@ -211,7 +211,7 @@ function buildGatherTwiml(replyText, callSid, flowType, baseUrl) {
   const actionUrl = `${baseUrl}/api/call/respond?flow=${flowType}`;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="Polly.Joanna" rate="90%">${escapeXml(replyText)}</Say>
+  <Say voice="Polly.Joanna-Neural" rate="90%">${escapeXml(replyText)}</Say>
   <Gather
     input="speech"
     action="${actionUrl}"
@@ -223,7 +223,7 @@ function buildGatherTwiml(replyText, callSid, flowType, baseUrl) {
     timeout="12"
   >
   </Gather>
-  <Say voice="Polly.Joanna" rate="90%">I did not catch that. ${escapeXml(replyText)}</Say>
+  <Say voice="Polly.Joanna-Neural" rate="90%">I did not catch that. ${escapeXml(replyText)}</Say>
   <Gather
     input="speech"
     action="${actionUrl}"
@@ -235,7 +235,7 @@ function buildGatherTwiml(replyText, callSid, flowType, baseUrl) {
     timeout="12"
   >
   </Gather>
-  <Say voice="Polly.Joanna">I am having trouble hearing you. Please try calling back. Goodbye.</Say>
+  <Say voice="Polly.Joanna-Neural">I am having trouble hearing you. Please try calling back. Goodbye.</Say>
   <Hangup/>
 </Response>`;
 }
@@ -243,7 +243,7 @@ function buildGatherTwiml(replyText, callSid, flowType, baseUrl) {
 function errorResponse(baseUrl) {
   return new NextResponse(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="Polly.Joanna">I am sorry, something went wrong. Please try calling back in a moment. Goodbye.</Say>
+  <Say voice="Polly.Joanna-Neural">I am sorry, something went wrong. Please try calling back in a moment. Goodbye.</Say>
   <Hangup/>
 </Response>`, { headers: { 'Content-Type': 'text/xml' } });
 }
