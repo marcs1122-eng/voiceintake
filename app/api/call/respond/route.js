@@ -33,7 +33,7 @@ const NEW_PATIENT_QUESTIONS = [
   { field: 'ros_neuro', question: 'Have you experienced any numbness, tingling, weakness, blackouts, seizures, or memory problems?' },
   { field: 'ros_msk', question: 'Besides your main complaint, do you have any other joint pain, stiffness, or limited range of motion?' },
   { field: 'ros_psych', question: 'Have you been experiencing any anxiety, depression, mood changes, or significant stress?' },
-  { field: 'ros_other', question: "Are there any other symptoms I haven't asked about that you'd like to mention?" },
+  { field: 'ros_other', question: 'Are there any other symptoms I have not asked about that you would like to mention?' },
   { field: 'pregnant', question: 'Are you currently pregnant or planning to become pregnant?' },
   { field: 'consent', question: 'Finally, do you authorize Global Neuro and Spine Institute to use your information to process your claims and treatment? Please say yes or no.' },
 ];
@@ -44,154 +44,157 @@ const FOLLOWUP_QUESTIONS = [
   { field: 'pain_loc', question: 'Where is your pain located?' },
   { field: 'pain_worse', question: 'What makes your pain worse?' },
   { field: 'pain_better', question: 'What makes your pain better?' },
-  { field: 'pain_desc', question: 'How would you describe your pain — sharp, burning, shooting, achy, or pressure?' },
+  { field: 'pain_desc', question: 'How would you describe your pain, sharp, burning, shooting, achy, or pressure?' },
   { field: 'pain_sev', question: 'On a scale of 0 to 10, what is your current pain level?' },
   { field: 'had_proc', question: 'Did you have a procedure during your last visit?' },
-  { field: 'proc_relief', question: 'How much pain relief did that procedure provide — less than 25 percent, 25 to 50 percent, 50 to 75 percent, or more than 75 percent?' },
+  { field: 'proc_relief', question: 'How much pain relief did that procedure provide? Less than 25 percent, 25 to 50 percent, 50 to 75 percent, or more than 75 percent?' },
   { field: 'new_meds', question: 'Are you taking any new medications since your last visit?' },
   { field: 'new_cond', question: 'Have you had any new illnesses, injuries, surgeries, or hospitalizations since your last visit?' },
   { field: 'fam_chg', question: 'Any changes in your family history since your last visit?' },
-  { field: 'soc_chg', question: 'Any changes in your social history — such as marital status, employment, or substance use?' },
+  { field: 'soc_chg', question: 'Any changes in your social history, such as marital status, employment, or substance use?' },
   { field: 'disability', question: 'Are you currently applying for disability benefits?' },
-  { field: 'ros', question: 'Are you experiencing any new symptoms today? For example: chest pain, shortness of breath, numbness, tingling, or anything else unusual?' },
-  { field: 'ros_other', question: "Anything else you'd like to mention before your appointment?" },
+  { field: 'ros', question: 'Are you experiencing any new symptoms today such as chest pain, shortness of breath, numbness, or tingling?' },
+  { field: 'ros_other', question: 'Anything else you would like to mention before your appointment?' },
 ];
 
+// In-memory session store — keyed by Twilio CallSid
+// Works well for demo; upgrade to Vercel KV for production
+const sessions = new Map();
+
 export async function POST(request) {
-  const formData = await request.formData();
-  const speechResult = formData.get('SpeechResult') || '';
-  const callSid = formData.get('CallSid');
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 'https://voiceintake.vercel.app';
+
+  let formData;
+  try {
+    formData = await request.formData();
+  } catch (e) {
+    console.error('FormData parse error:', e);
+    return errorResponse(baseUrl);
+  }
+
+  const speechResult = (formData.get('SpeechResult') || '').trim();
+  const callSid = formData.get('CallSid') || '';
 
   const url = new URL(request.url);
-  const baseUrl = process.env.VERCEL_URL
-    ? `https://${process.env.VERCEL_URL}`
-    : process.env.NEXT_PUBLIC_BASE_URL || 'https://voiceintake.vercel.app';
+  const flowType = url.searchParams.get('flow') || 'new';
 
-  let state;
-  try {
-    state = JSON.parse(decodeURIComponent(url.searchParams.get('state') || '{}'));
-  } catch (e) {
-    console.error('State parse error:', e);
-    return errorResponse(baseUrl);
+  console.log(`[${callSid}] Speech: "${speechResult}"`);
+
+  // Get or initialize session
+  let session = sessions.get(callSid);
+  if (!session) {
+    session = {
+      flowType,
+      callSid,
+      questionIndex: 0,
+      allResponses: {},
+      chatHistory: [],
+    };
+    sessions.set(callSid, session);
   }
 
-  const { flowType = 'new', currentField, allResponses = {}, chatHistory = [], questionIndex = 0 } = state;
-  const questions = flowType === 'followup' ? FOLLOWUP_QUESTIONS : NEW_PATIENT_QUESTIONS;
+  const questions = session.flowType === 'followup' ? FOLLOWUP_QUESTIONS : NEW_PATIENT_QUESTIONS;
+  const currentQ = questions[session.questionIndex];
 
-  console.log(`Call ${callSid} | Field: ${currentField} | Speech: "${speechResult}"`);
-
-  if (!speechResult || speechResult.trim() === '') {
-    const retryTwiml = buildGatherTwiml(
-      "I'm sorry, I didn't hear that. Could you please repeat your answer?",
-      buildStateParam(state),
-      baseUrl
+  // No speech — repeat current question
+  if (!speechResult) {
+    return new NextResponse(
+      buildGatherTwiml("I am sorry, I did not hear that. " + currentQ.question, callSid, session.flowType, baseUrl),
+      { headers: { 'Content-Type': 'text/xml' } }
     );
-    return new NextResponse(retryTwiml, { headers: { 'Content-Type': 'text/xml' } });
   }
 
+  // Process with Claude
   let claudeResponse;
   try {
-    claudeResponse = await processWithClaude({
-      speech: speechResult,
-      currentField,
-      allResponses,
-      chatHistory,
-      questionIndex,
-      questions,
-      flowType,
-    });
+    claudeResponse = await processWithClaude(speechResult, session, questions);
   } catch (err) {
-    console.error('Claude error:', err);
-    return errorResponse(baseUrl);
+    console.error(`[${callSid}] Claude error:`, err);
+    return new NextResponse(
+      buildGatherTwiml("I am sorry, I had a technical hiccup. Could you repeat that?", callSid, session.flowType, baseUrl),
+      { headers: { 'Content-Type': 'text/xml' } }
+    );
   }
 
   const { action, updates, reply, skipTo } = claudeResponse;
 
-  const newResponses = { ...allResponses, ...updates };
-  const newHistory = [
-    ...chatHistory,
+  // Update session in place
+  session.allResponses = { ...session.allResponses, ...updates };
+  session.chatHistory = [
+    ...session.chatHistory,
     { role: 'user', content: speechResult },
     { role: 'assistant', content: reply },
-  ].slice(-20);
-
-  let nextIndex = questionIndex;
-  let nextField = currentField;
+  ].slice(-12);
 
   if (action === 'advance') {
     if (skipTo) {
       const skipIndex = questions.findIndex(q => q.field === skipTo);
-      nextIndex = skipIndex !== -1 ? skipIndex : questionIndex + 1;
-      nextField = questions[nextIndex]?.field || 'done';
+      session.questionIndex = skipIndex !== -1 ? skipIndex : session.questionIndex + 1;
     } else {
-      nextIndex = questionIndex + 1;
-      nextField = questions[nextIndex]?.field || 'done';
+      session.questionIndex += 1;
     }
   }
 
-  if (nextField === 'done' || nextIndex >= questions.length) {
-    const closingTwiml = `<?xml version="1.0" encoding="UTF-8"?>
+  sessions.set(callSid, session);
+
+  // All questions answered — wrap up
+  if (session.questionIndex >= questions.length) {
+    sessions.delete(callSid);
+    console.log(`[${callSid}] Intake complete:`, session.allResponses);
+
+    const doneTwiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="Polly.Joanna" rate="95%">${escapeXml(reply)}</Say>
-  <Say voice="Polly.Joanna" rate="95%">Your intake is now complete. Thank you for taking the time to complete this. The clinical team will review your information before your appointment. You may hang up now. Goodbye!</Say>
+  <Say voice="Polly.Joanna" rate="90%">${escapeXml(reply)}</Say>
+  <Pause length="1"/>
+  <Say voice="Polly.Joanna" rate="90%">Your intake is now complete. Thank you so much for your time. Our clinical team will review your information before your appointment. Have a great day and goodbye!</Say>
 </Response>`;
-    return new NextResponse(closingTwiml, { headers: { 'Content-Type': 'text/xml' } });
+    return new NextResponse(doneTwiml, { headers: { 'Content-Type': 'text/xml' } });
   }
 
-  const newState = {
-    flowType,
-    callSid,
-    currentField: nextField,
-    allResponses: newResponses,
-    chatHistory: newHistory,
-    questionIndex: nextIndex,
-  };
-
-  const twiml = buildGatherTwiml(reply, buildStateParam(newState), baseUrl);
-  return new NextResponse(twiml, { headers: { 'Content-Type': 'text/xml' } });
+  return new NextResponse(
+    buildGatherTwiml(reply, callSid, session.flowType, baseUrl),
+    { headers: { 'Content-Type': 'text/xml' } }
+  );
 }
 
-async function processWithClaude({ speech, currentField, allResponses, chatHistory, questionIndex, questions, flowType }) {
-  const currentQ = questions[questionIndex];
-  const nextQ = questions[questionIndex + 1];
-  const answeredFields = Object.keys(allResponses);
+async function processWithClaude(speech, session, questions) {
+  const currentQ = questions[session.questionIndex];
+  const nextQ = questions[session.questionIndex + 1];
+  const patientName = session.allResponses['full_name'] || '';
+  const firstName = patientName.split(' ')[0] || '';
 
-  const systemPrompt = `You are a warm, friendly medical intake assistant for Global Neuro and Spine Institute, a pain management practice in Florida. You are conducting a patient intake over the phone — like a kind, efficient nurse.
+  const systemPrompt = `You are Sarah, a warm and friendly medical intake assistant for Global Neuro and Spine Institute, a pain management practice in Florida. You are on a phone call — speak naturally like a caring nurse, not a robot.
 
 CRITICAL RULES:
-1. Keep ALL replies to 1-2 short sentences maximum. These are spoken aloud on a phone call.
-2. When advancing, include BOTH your acknowledgment AND the next question in your reply.
+1. Keep ALL replies to 1-2 SHORT sentences. They are spoken aloud on a phone call.
+2. When advancing, include BOTH a brief acknowledgment AND the next question in one reply.
 3. Never repeat questions already answered.
-4. If the patient corrects something, use action="stay" and fix it without advancing.
-5. If the patient gives multiple answers at once, capture all of them and skip ahead with skipTo.
-6. Use the patient's first name once you know it.
-7. Be warm but efficient — elderly patients appreciate clarity.
-8. Understand common patient phrasings: "water pill" = diuretic, "sugar" = diabetes, "bad back" = lumbar pain, "BP" = blood pressure.
+4. If patient corrects something, use action="stay", fix it, do not advance.
+5. If patient gives multiple answers at once, capture all with skipTo to jump ahead.
+6. ${firstName ? `Address the patient as ${firstName} occasionally.` : 'Use a warm friendly tone.'}
+7. Understand patient phrasings: "water pill"=diuretic, "sugar"=diabetes, "bad back"=lumbar pain, "blood thinner"=anticoagulant, "nerve pain"=neuropathic pain.
+8. Accept casual yes/no: "yeah", "nope", "uh huh", "nah" are all valid.
+9. Sound natural — avoid "I understand", "Great!", "Certainly!" — those sound robotic.
+10. Speak as if talking to an elderly patient — clear, warm, patient, no jargon.
 
-CURRENT INTAKE STATE:
-- Visit type: ${flowType === 'followup' ? 'Follow-up visit' : 'New patient'}
-- Current question field: ${currentField}
+CURRENT STATE:
+- Visit type: ${session.flowType === 'followup' ? 'Follow-up visit' : 'New patient visit'}
+- Current field: ${currentQ?.field}
 - Current question: "${currentQ?.question}"
-- Next question: "${nextQ?.question || 'This is the last question'}"
-- Already collected: ${JSON.stringify(answeredFields)}
+- Next question: "${nextQ?.question || 'This is the last question. Thank the patient warmly and let them know they are all done.'}"
+- Fields collected so far: ${Object.keys(session.allResponses).join(', ') || 'none yet'}
 
-Respond ONLY with a valid JSON object — no markdown, no backticks, no extra text:
-{
-  "action": "advance" or "stay",
-  "updates": { "field_name": "captured value" },
-  "reply": "Your spoken response including next question if advancing",
-  "skipTo": "field_name" or null
-}`;
-
-  const messages = [
-    ...chatHistory.slice(-10).map(h => ({ role: h.role, content: h.content })),
-    { role: 'user', content: speech },
-  ];
+Respond ONLY with valid JSON — no markdown, no backticks, nothing else:
+{"action":"advance","updates":{"field_name":"value"},"reply":"your spoken reply here","skipTo":null}`;
 
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
-    max_tokens: 300,
+    max_tokens: 250,
     system: systemPrompt,
-    messages,
+    messages: [
+      ...session.chatHistory.slice(-8).map(h => ({ role: h.role, content: h.content })),
+      { role: 'user', content: speech },
+    ],
   });
 
   const text = response.content[0].text.trim();
@@ -200,62 +203,49 @@ Respond ONLY with a valid JSON object — no markdown, no backticks, no extra te
     return JSON.parse(text);
   } catch (e) {
     console.error('Claude JSON parse error:', text);
-    return {
-      action: 'stay',
-      updates: {},
-      reply: "I'm sorry, could you repeat that?",
-      skipTo: null,
-    };
+    return { action: 'stay', updates: {}, reply: "Could you say that again please?", skipTo: null };
   }
 }
 
-function buildGatherTwiml(replyText, stateParam, baseUrl) {
+function buildGatherTwiml(replyText, callSid, flowType, baseUrl) {
+  const actionUrl = `${baseUrl}/api/call/respond?flow=${flowType}`;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="Polly.Joanna" rate="95%">${escapeXml(replyText)}</Say>
+  <Say voice="Polly.Joanna" rate="90%">${escapeXml(replyText)}</Say>
   <Gather
     input="speech"
-    action="${baseUrl}/api/call/respond?state=${stateParam}"
+    action="${actionUrl}"
     method="POST"
-    speechTimeout="2"
+    speechTimeout="3"
     speechModel="phone_call"
     enhanced="true"
     language="en-US"
-    timeout="10"
+    timeout="12"
   >
   </Gather>
-  <Say voice="Polly.Joanna">I didn't catch that. ${escapeXml(replyText)}</Say>
+  <Say voice="Polly.Joanna" rate="90%">I did not catch that. ${escapeXml(replyText)}</Say>
   <Gather
     input="speech"
-    action="${baseUrl}/api/call/respond?state=${stateParam}"
+    action="${actionUrl}"
     method="POST"
-    speechTimeout="2"
+    speechTimeout="3"
     speechModel="phone_call"
     enhanced="true"
     language="en-US"
-    timeout="10"
+    timeout="12"
   >
   </Gather>
-  <Say voice="Polly.Joanna">I'm having trouble hearing you. Please call back and we'll try again. Goodbye.</Say>
+  <Say voice="Polly.Joanna">I am having trouble hearing you. Please try calling back. Goodbye.</Say>
   <Hangup/>
 </Response>`;
-}
-
-function buildStateParam(state) {
-  const trimmed = {
-    ...state,
-    chatHistory: state.chatHistory?.slice(-6) || [],
-  };
-  return encodeURIComponent(JSON.stringify(trimmed));
 }
 
 function errorResponse(baseUrl) {
-  const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+  return new NextResponse(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Say voice="Polly.Joanna">I'm sorry, I'm having a technical issue. Please call back in a moment. Goodbye.</Say>
+  <Say voice="Polly.Joanna">I am sorry, something went wrong. Please try calling back in a moment. Goodbye.</Say>
   <Hangup/>
-</Response>`;
-  return new NextResponse(twiml, { headers: { 'Content-Type': 'text/xml' } });
+</Response>`, { headers: { 'Content-Type': 'text/xml' } });
 }
 
 function escapeXml(str) {
