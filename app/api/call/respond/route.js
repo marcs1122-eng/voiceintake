@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 
 import Anthropic from '@anthropic-ai/sdk';
 
+import { kv } from '@vercel/kv';
+
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const BASE_URL = 'https://voiceintake.vercel.app';
@@ -68,8 +70,6 @@ const PROGRESS_MESSAGES = {
   28: "Nearly done now.",
 };
 
-const sessions = new Map();
-
 export async function POST(request) {
   let formData;
   try {
@@ -86,7 +86,8 @@ export async function POST(request) {
 
   console.log(`[${callSid}] Speech: "${speechResult}"`);
 
-  let session = sessions.get(callSid);
+  // Load session from KV — persists across all Vercel function instances
+  let session = await kv.get(`session:${callSid}`);
   if (!session) {
     session = {
       flowType,
@@ -95,27 +96,28 @@ export async function POST(request) {
       allResponses: {},
       chatHistory: [],
     };
-    sessions.set(callSid, session);
   }
 
   const questions = session.flowType === 'followup' ? FOLLOWUP_QUESTIONS : NEW_PATIENT_QUESTIONS;
-
   const currentQ = questions[session.questionIndex];
 
   if (!speechResult) {
+    await kv.set(`session:${callSid}`, session, { ex: 3600 });
     return respondWithAudio(`I didn't catch that. ${currentQ.question}`, flowType);
   }
 
+  // Check for go-back request
   const goBackPhrases = ['go back', 'previous question', 'last question', 'back up', 'undo that', 'change my last'];
   const wantsGoBack = goBackPhrases.some(p => speechResult.toLowerCase().includes(p));
 
   if (wantsGoBack && session.questionIndex > 0) {
     session.questionIndex -= 1;
     const prevQ = questions[session.questionIndex];
-    sessions.set(callSid, session);
+    await kv.set(`session:${callSid}`, session, { ex: 3600 });
     return respondWithAudio(`No problem. ${prevQ.question}`, flowType);
   }
 
+  // Process with Claude
   let claudeResponse;
   try {
     claudeResponse = await processWithClaude(speechResult, session, questions);
@@ -127,7 +129,6 @@ export async function POST(request) {
   const { action, updates, reply, skipTo } = claudeResponse;
 
   session.allResponses = { ...session.allResponses, ...updates };
-
   session.chatHistory = [
     ...session.chatHistory,
     { role: 'user', content: speechResult },
@@ -143,13 +144,15 @@ export async function POST(request) {
     }
   }
 
-  sessions.set(callSid, session);
+  // Save session back to KV with 1 hour expiry
+  await kv.set(`session:${callSid}`, session, { ex: 3600 });
 
   const progressMsg = PROGRESS_MESSAGES[session.questionIndex] || '';
 
   if (session.questionIndex >= questions.length) {
-    sessions.delete(callSid);
+    await kv.del(`session:${callSid}`);
     console.log(`[${callSid}] Intake complete:`, session.allResponses);
+
     const finalText = `${reply} Your intake is all set. The clinical team will review everything before your appointment. Thanks so much and have a great day!`;
     return respondWithAudio(finalText, flowType, true);
   }
@@ -163,22 +166,18 @@ async function processWithClaude(speech, session, questions) {
   const nextQ = questions[session.questionIndex + 1];
   const firstName = (session.allResponses['full_name'] || '').split(' ')[0] || '';
 
-  const nameRule = firstName ? 'Use ' + firstName + "'s name occasionally, not every time." : 'Warm friendly tone.';
-
   const systemPrompt = `You are Sarah, a warm and caring intake assistant for Global Neuro and Spine Institute in Florida. You are on a phone call with a patient. Sound completely natural — like a real person, not a robot or a form. Think of how a great nurse talks to patients.
 
 VOICE RULES — critical, these are spoken aloud on a phone:
-
 1. 1-2 short sentences MAX per reply. Never longer.
 2. When advancing, briefly acknowledge then ask next question — in one reply.
 3. Never repeat a question already answered.
 4. Use contractions: "you're", "that's", "I'll", "let's" — sounds human.
 5. NO "Great!", "Certainly!", "Absolutely!", "I understand" — robotic and fake.
-6. ${nameRule}
+6. ${firstName ? `Use ${firstName}\'s name occasionally, not every time.` : 'Warm friendly tone.'}
 7. If patient asks something off-topic like office location or hours, answer in one brief sentence then return to the question.
 
 MEDICAL UNDERSTANDING — interpret these patient phrasings correctly:
-
 - "water pill" = diuretic
 - "sugar" or "diabetic" = diabetes
 - "bad back" = lumbar pain
@@ -191,12 +190,10 @@ MEDICAL UNDERSTANDING — interpret these patient phrasings correctly:
 - Accept: "yeah", "nope", "uh huh", "nah", "not really", "kind of"
 
 SPECIAL FIELDS:
-
 - name_spelling: Capture spelling exactly. Reply: "Got it — [First] spelled [F-I-R-S-T], [Last] spelled [L-A-S-T]. Is that right?"
 - name_confirm: Yes = advance. Correction = fix, stay, re-confirm.
 
 CURRENT STATE:
-
 - Visit: ${session.flowType === 'followup' ? 'Follow-up' : 'New patient'}
 - Field: ${currentQ?.field}
 - Question: "${currentQ?.question}"
@@ -206,7 +203,6 @@ CURRENT STATE:
 - Spelling: ${session.allResponses['name_spelling'] || 'unknown'}
 
 Reply ONLY with valid JSON, no markdown, no backticks:
-
 {"action":"advance","updates":{"field":"value"},"reply":"spoken reply","skipTo":null}`;
 
   const response = await anthropic.messages.create({
@@ -233,6 +229,7 @@ function respondWithAudio(text, flowType, isFinal = false) {
   const actionUrl = `${BASE_URL}/api/call/respond?flow=${flowType}`;
 
   let twiml;
+
   if (isFinal) {
     twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
