@@ -1,0 +1,13 @@
+{
+  "functions": {
+    "app/api/call/respond/route.js": {
+      "maxDuration": 60
+    },
+    "app/api/audio/route.js": {
+      "maxDuration": 30
+    },
+    "app/api/call/incoming/route.js": {
+      "maxDuration": 15
+    }
+  }
+}
