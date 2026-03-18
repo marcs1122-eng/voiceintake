@@ -3,12 +3,7 @@
 // GET  ?id=call_abc123     → returns intake record for that call ID
 // DELETE ?phone=...        → clears session after successful completion
 
-import { Redis } from '@upstash/redis';
-
-const redis = new Redis({
-  url: process.env.KV_REST_API_URL,
-  token: process.env.KV_REST_API_TOKEN,
-});
+import { kv } from '@vercel/kv';
 
 export async function GET(req) {
   try {
@@ -20,9 +15,9 @@ export async function GET(req) {
     }
     let data = null;
     if (phone) {
-      data = await redis.get(`session:${phone.replace(/\D/g, '')}`);
+      data = await kv.get(`session:${phone.replace(/\D/g, '')}`);
     } else if (id) {
-      data = await redis.get(`intake:${id}`);
+      data = await kv.get(`intake:${id}`);
     }
     if (!data) return new Response(JSON.stringify({ found: false }), { status: 200 });
     const parsed = typeof data === 'string' ? JSON.parse(data) : data;
@@ -37,7 +32,7 @@ export async function DELETE(req) {
     const { searchParams } = new URL(req.url);
     const phone = searchParams.get('phone');
     if (!phone) return new Response(JSON.stringify({ error: 'phone required' }), { status: 400 });
-    await redis.del(`session:${phone.replace(/\D/g, '')}`);
+    await kv.del(`session:${phone.replace(/\D/g, '')}`);
     return new Response(JSON.stringify({ deleted: true }), { status: 200 });
   } catch (err) {
     return new Response(JSON.stringify({ error: err.message }), { status: 500 });

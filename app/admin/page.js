@@ -131,7 +131,7 @@ export default function AdminDashboard() {
                   <div style={{color:'#94a3b8',fontSize:13,marginTop:4}}>{i.chief_complaint||'No complaint'}{i.pain_severity?' - Pain: '+i.pain_severity+'/10':''}</div>
                   <div style={{color:'#475569',fontSize:12,marginTop:2}}>{i.completed_at?new Date(i.completed_at).toLocaleString():''}{i.caller_phone?' - '+i.caller_phone:''}</div>
                 </div>
-                <div style={{color:'#475569',fontSize:20}}>></div>
+                <div style={{color:'#475569',fontSize:20}}>{'>'}</div>
               </div>
             ))}
           </div>

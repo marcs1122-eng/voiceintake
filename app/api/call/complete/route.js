@@ -5,8 +5,18 @@ import { Resend } from 'resend';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Lazy-initialize clients to avoid build-time crashes when env vars are missing
+let _anthropic;
+function getAnthropic() {
+  if (!_anthropic) _anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  return _anthropic;
+}
+
+let _resend;
+function getResend() {
+  if (!_resend) _resend = new Resend(process.env.RESEND_API_KEY);
+  return _resend;
+}
 
 async function parseTranscript(transcript) {
   const messages = transcript
@@ -15,7 +25,7 @@ async function parseTranscript(transcript) {
 
   const callDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
-  const response = await anthropic.messages.create({
+  const response = await getAnthropic().messages.create({
     model: 'claude-haiku-4-5',
     max_tokens: 1500,
     messages: [{
@@ -178,7 +188,7 @@ export async function POST(request) {
     const mins = Math.floor(callDuration / 60);
     const secs = callDuration % 60;
 
-    await resend.emails.send({
+    await getResend().emails.send({
       from: 'VoiceIntake <onboarding@resend.dev>',
       to: practiceEmail,
       subject: 'Intake Complete: ' + patientName + ' — ' + today,
