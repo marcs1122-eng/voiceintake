@@ -7,8 +7,10 @@ const BASE_URL = 'https://voiceintake.vercel.app';
 
 const NEW_PATIENT_QUESTIONS = [
   { field: 'full_name', question: 'What is your full name?' },
-  { field: 'name_spelling', question: 'Can you spell your first and last name for me?' },
-  { field: 'name_confirm', question: 'Let me read that back to confirm.' },
+  { field: 'name_spelling_first', question: 'Can you spell your first name please?' },
+  { field: 'name_confirm_first', question: 'Is that spelling correct?' },
+  { field: 'name_spelling_last', question: 'Now can you spell your last name please?' },
+  { field: 'name_confirm_last', question: 'Is that spelling correct?' },
   { field: 'dob', question: 'What is your date of birth?' },
   { field: 'height', question: 'What is your height?' },
   { field: 'weight', question: 'What is your weight?' },
@@ -119,7 +121,8 @@ export async function POST(request) {
 
   if (!speechResult) {
     kv.set(`session:${callSid}`, session, { ex: 3600 }).catch(() => {});
-    return respondWithAudio(`I didn't catch that. ${currentQ.question}`, flowType);
+    const isSpellFallback = ['name_spelling_first', 'name_spelling_last'].includes(currentQ?.field);
+    return respondWithAudio(`I didn't catch that. ${currentQ.question}`, flowType, false, isSpellFallback);
   }
 
   const goBackPhrases = ['go back', 'previous question', 'last question', 'back up', 'undo that', 'change my last'];
@@ -139,7 +142,7 @@ export async function POST(request) {
   }
 
   const { action, updates, reply, skipTo } = claudeResponse;
-  session.allResponses = { ...session.allResponses, ...updates },
+  session.allResponses = { ...session.allResponses, ...updates };
   session.chatHistory = [
     ...session.chatHistory,
     { role: 'user', content: speechResult },
@@ -168,7 +171,10 @@ export async function POST(request) {
 
   const progressMsg = PROGRESS_MESSAGES[session.questionIndex] || '';
   const fullReply = progressMsg ? `${reply} ${progressMsg}` : reply;
-  return respondWithAudio(fullReply, flowType);
+  // Use longer speechTimeout when asking a spelling question
+  const SPELL_FIELDS = ['name_spelling_first', 'name_spelling_last'];
+  const isSpellMode = SPELL_FIELDS.includes(questions[session.questionIndex]?.field);
+  return respondWithAudio(fullReply, flowType, false, isSpellMode);
 }
 
 async function processWithClaude(speech, session, questions) {
@@ -200,8 +206,10 @@ MEDICAL UNDERSTANDING — interpret these patient phrasings correctly:
 - Accept: "yeah", "nope", "uh huh", "nah", "not really", "kind of"
 
 SPECIAL FIELDS:
-- name_spelling: Capture spelling exactly. Reply: "Got it — [First] spelled [F-I-R-S-T], [Last] spelled [L-A-S-T]. Is that right?"
-- name_confirm: Yes = advance. Correction = fix, stay, re-confirm.
+- name_spelling_first: Patient spells their first name letter by letter. Twilio transcribes this as space-separated letters like "M a r c". Capture every letter, reconstruct the name, and read it back: "Got it — [FirstName] spelled [M-A-R-C]. Is that right?" Store as first_name_confirmed.
+- name_confirm_first: Patient confirms first name spelling. Yes/correct = advance. If they say no or correct it, update first_name_confirmed with the corrected spelling, stay on name_confirm_first, read corrected spelling back to re-confirm.
+- name_spelling_last: Patient spells their last name letter by letter. Same Twilio format — space-separated letters. Reconstruct and read back: "Got it — [LastName] spelled [S-L-O-B-A-S-K-Y]. Is that right?" Store as last_name_confirmed.
+- name_confirm_last: Patient confirms last name spelling. Yes = advance. No/correction = update last_name_confirmed, stay, re-confirm. When advancing, also store full_name_confirmed = first_name_confirmed + " " + last_name_confirmed.
 - dob: Accept any spoken format — "10 15 1980", "ten fifteen eighty", "October 15th 1980" all mean the same date. Store as MM/DD/YYYY. Never ask the patient to restate in a different format.
 
 CURRENT STATE:
@@ -211,7 +219,8 @@ CURRENT STATE:
 - Next: "${nextQ?.question || 'Last question — wrap up warmly.'}"
 - Collected: ${Object.keys(session.allResponses).join(', ') || 'none'}
 - Name: ${session.allResponses['full_name'] || 'unknown'}
-- Spelling: ${session.allResponses['name_spelling'] || 'unknown'}
+- First name confirmed: ${session.allResponses['first_name_confirmed'] || 'unknown'}
+- Last name confirmed: ${session.allResponses['last_name_confirmed'] || 'unknown'}
 
 Reply ONLY with valid JSON, no markdown, no backticks:
 {"action":"advance","updates":{"field":"value"},"reply":"spoken reply","skipTo":null}`;
@@ -235,9 +244,11 @@ Reply ONLY with valid JSON, no markdown, no backticks:
   }
 }
 
-function respondWithAudio(text, flowType, isFinal = false) {
+function respondWithAudio(text, flowType, isFinal = false, spellMode = false) {
   const audioUrl = `${BASE_URL}/api/audio?text=${encodeURIComponent(text)}`;
   const actionUrl = `${BASE_URL}/api/call/respond?flow=${flowType}`;
+  // Spelling questions need longer timeout — patients pause ~1s between letters
+  const st = spellMode ? '3' : '1';
   let twiml;
 
   if (isFinal) {
@@ -246,16 +257,15 @@ function respondWithAudio(text, flowType, isFinal = false) {
   <Play>${audioUrl}</Play>
 </Response>`;
   } else {
-    // FIX: speechTimeout back to "1" — "2" was causing ~1 extra second of dead air per turn
     twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Gather input="speech" action="${actionUrl}" method="POST"
-    speechTimeout="1"
+    speechTimeout="${st}"
     speechModel="phone_call" enhanced="true" language="en-US" timeout="10">
     <Play>${audioUrl}</Play>
   </Gather>
   <Gather input="speech" action="${actionUrl}" method="POST"
-    speechTimeout="1"
+    speechTimeout="${st}"
     speechModel="phone_call" enhanced="true" language="en-US" timeout="10">
     <Play>${BASE_URL}/api/audio?text=${encodeURIComponent("I didn't catch that. " + text)}</Play>
   </Gather>
@@ -270,7 +280,7 @@ function respondWithAudio(text, flowType, isFinal = false) {
 function errorTwiml() {
   return new NextResponse(`<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Play>${BASE_URL}/api/audio?text=${encodeURIComponent("I'm sorry, something went wrong. Please call back in a moment.")}</Play>
+  <Play>${AASE_URL}/api/audio?text=${encodeURIComponent("I'm sorry, something went wrong. Please call back in a moment.")}</Play>
   <Hangup/>
 </Response>`, { headers: { 'Content-Type': 'text/xml' } });
 }
