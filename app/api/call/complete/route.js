@@ -5,7 +5,6 @@ import { Resend } from 'resend';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-// Lazy-initialize clients to avoid build-time crashes when env vars are missing
 let _anthropic;
 function getAnthropic() {
   if (!_anthropic) _anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -18,6 +17,56 @@ function getResend() {
   return _resend;
 }
 
+// Map session.allResponses keys to PDF field names (avoids re-parsing with Claude)
+function mapSessionResponses(allResponses) {
+  const r = allResponses || {};
+  const callDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  return {
+    full_name: r.full_name || null,
+    dob: r.dob || null,
+    height: r.height || null,
+    weight: r.weight || null,
+    visit_type: r.visit_type || 'new_patient',
+    chief_complaint: r.chief_complaint || null,
+    pain_location: r.pain_loc || null,
+    pain_radiation: r.pain_rad || null,
+    pain_worse: r.pain_worse || null,
+    pain_better: r.pain_better || null,
+    pain_description: r.pain_desc || null,
+    pain_severity: r.pain_sev || null,
+    cause_of_pain: r.cause || null,
+    date_of_injury: r.date_of_injury || null,
+    prior_pain: r.prior_pain || null,
+    treatments: r.treatments || null,
+    medications: r.meds || null,
+    allergies: r.allergies || null,
+    medical_conditions: r.conditions || null,
+    surgeries: r.surgeries || null,
+    hospitalizations: r.hosps || null,
+    family_history: r.fam_hx || null,
+    marital_status: r.marital || null,
+    employment: r.employment || null,
+    smoking: r.smoking || null,
+    alcohol: r.alcohol || null,
+    disability: r.disability || null,
+    ros_constitutional: r.ros_const || null,
+    ros_cardiovascular: r.ros_cardio || null,
+    ros_neurological: r.ros_neuro || null,
+    ros_musculoskeletal: r.ros_msk || null,
+    ros_psychiatric: r.ros_psych || null,
+    ros_other: r.ros_other || null,
+    pregnant: r.pregnant || null,
+    had_procedure: r.had_proc || null,
+    procedure_relief: r.proc_relief || null,
+    new_medications: r.new_meds || null,
+    new_conditions: r.new_cond || null,
+    family_changes: r.fam_chg || null,
+    social_changes: r.soc_chg || null,
+    verbal_consent: r.verbal_consent || 'Yes — recorded on call',
+    call_date: callDate,
+  };
+}
+
 async function parseTranscript(transcript) {
   const messages = transcript
     .map(t => (t.role === 'agent' ? 'Sarah' : 'Patient') + ': ' + t.message)
@@ -26,7 +75,7 @@ async function parseTranscript(transcript) {
   const callDate = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
   const response = await getAnthropic().messages.create({
-    model: 'claude-haiku-4-5',
+    model: 'claude-sonnet-4-6',
     max_tokens: 1500,
     messages: [{
       role: 'user',
@@ -169,6 +218,7 @@ export async function POST(request) {
   try {
     const body = await request.json();
     const transcript = body?.data?.transcript || body?.transcript || [];
+    const allResponses = body?.data?.allResponses || null;
     const conversationId = body?.data?.conversation_id || body?.conversation_id || 'unknown';
     const callDuration = body?.data?.metadata?.call_duration_secs || 0;
 
@@ -176,9 +226,11 @@ export async function POST(request) {
       return Response.json({ error: 'No transcript received' }, { status: 400 });
     }
 
-    console.log('[call/complete] Processing call ' + conversationId + ', ' + transcript.length + ' messages');
+    console.log('[call/complete] Processing call ' + conversationId + ', ' + transcript.length + ' messages, structured=' + !!allResponses);
 
-    const intakeData = await parseTranscript(transcript);
+    // Use structured allResponses if available (faster + reliable), else fall back to Sonnet parsing
+    const intakeData = allResponses ? mapSessionResponses(allResponses) : await parseTranscript(transcript);
+
     const pdfBuffer = await generatePDF(intakeData);
 
     const practiceEmail = process.env.PRACTICE_EMAIL || 'intake@voiceintake.com';
