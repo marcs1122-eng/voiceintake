@@ -1,161 +1,258 @@
 'use client';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 
 export default function AdminDashboard() {
-  const [password, setPassword] = useState('');
-  const [authed, setAuthed] = useState(false);
-  const [storedPw, setStoredPw] = useState('');
   const [intakes, setIntakes] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [password, setPassword] = useState('');
+  const [authenticated, setAuthenticated] = useState(false);
   const [selected, setSelected] = useState(null);
-  const [filterType, setFilterType] = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
   const [search, setSearch] = useState('');
+  const [typeFilter, setTypeFilter] = useState('all');
 
-  useEffect(() => {
-    const saved = localStorage.getItem('vi_admin_pw');
-    if (saved) { setStoredPw(saved); setPassword(saved); setAuthed(true); }
-  }, []);
-
-  const fetchIntakes = useCallback(async (pw) => {
-    setLoading(true); setError('');
+  async function login() {
+    setLoading(true);
+    setError(null);
     try {
-      const params = new URLSearchParams({ limit: '100' });
-      if (filterType) params.set('type', filterType);
-      if (filterStatus) params.set('status', filterStatus);
-      const res = await fetch('/api/admin/intakes?' + params, { headers: { Authorization: 'Bearer ' + pw } });
-      if (res.status === 401) { setAuthed(false); setError('Wrong password'); return; }
+      const res = await fetch('/api/admin/intakes', {
+        headers: { Authorization: `Bearer ${password}` },
+      });
+      if (res.status === 401) {
+        setError('Incorrect password');
+        setLoading(false);
+        return;
+      }
       const data = await res.json();
+      if (data.error) throw new Error(data.error);
       setIntakes(data.intakes || []);
-    } catch (e) { setError('Failed: ' + e.message); }
-    finally { setLoading(false); }
-  }, [filterType, filterStatus]);
-
-  useEffect(() => { if (authed && storedPw) fetchIntakes(storedPw); }, [authed, storedPw, fetchIntakes]);
-
-  function handleLogin(e) {
-    e.preventDefault();
-    localStorage.setItem('vi_admin_pw', password);
-    setStoredPw(password); setAuthed(true);
+      setAuthenticated(true);
+    } catch (e) {
+      setError(e.message);
+    }
+    setLoading(false);
   }
-  function handleLogout() {
-    localStorage.removeItem('vi_admin_pw');
-    setAuthed(false); setStoredPw(''); setPassword(''); setIntakes([]);
+
+  function downloadPDF(intake) {
+    window.open(`/api/admin/pdf/${intake.callSid}`, '_blank');
   }
 
   const filtered = intakes.filter(i => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (i.full_name||'').toLowerCase().includes(q)||(i.chief_complaint||'').toLowerCase().includes(q)||(i.caller_phone||'').includes(q);
+    const matchSearch =
+      !search ||
+      (i.patientName || '').toLowerCase().includes(search.toLowerCase()) ||
+      (i.chiefComplaint || '').toLowerCase().includes(search.toLowerCase());
+    const matchType =
+      typeFilter === 'all' ||
+      (i.visitType || 'new_patient') === typeFilter;
+    return matchSearch && matchType;
   });
 
   const stats = {
     total: intakes.length,
-    complete: intakes.filter(i=>i.completion_status==='complete').length,
-    partial: intakes.filter(i=>i.completion_status==='partial').length,
-    newP: intakes.filter(i=>i.visit_type==='new_patient').length,
-    fu: intakes.filter(i=>i.visit_type==='follow_up').length,
+    today: intakes.filter(i => {
+      if (!i.completedAt) return false;
+      const d = new Date(i.completedAt);
+      const now = new Date();
+      return d.toDateString() === now.toDateString();
+    }).length,
+    newPatients: intakes.filter(i => (i.visitType || 'new_patient') === 'new_patient').length,
+    followUps: intakes.filter(i => i.visitType === 'follow_up').length,
   };
 
-  if (!authed) return (
-    <div style={{minHeight:'100vh',background:'#0f172a',display:'flex',alignItems:'center',justifyContent:'center',fontFamily:'system-ui,sans-serif'}}>
-      <div style={{background:'#1e293b',borderRadius:16,padding:40,width:360,boxShadow:'0 25px 50px rgba(0,0,0,0.5)'}}>
-        <div style={{textAlign:'center',marginBottom:32}}>
-          <div style={{fontSize:40,marginBottom:8}}>🏥</div>
-          <h1 style={{color:'white',margin:0,fontSize:22}}>VoiceIntake Admin</h1>
-          <p style={{color:'#94a3b8',margin:'4px 0 0',fontSize:14}}>Global Neuro and Spine Institute</p>
+  if (!authenticated) {
+    return (
+      <div style={{ minHeight: '100vh', background: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'system-ui, sans-serif' }}>
+        <div style={{ background: '#1e293b', borderRadius: 12, padding: 40, width: 360, boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}>
+          <div style={{ textAlign: 'center', marginBottom: 32 }}>
+            <div style={{ fontSize: 32, marginBottom: 8 }}>🏥</div>
+            <h1 style={{ color: '#f1f5f9', fontSize: 22, fontWeight: 700, margin: 0 }}>VoiceIntake Admin</h1>
+            <p style={{ color: '#94a3b8', fontSize: 14, marginTop: 8 }}>Global Neuro &amp; Spine Institute</p>
+          </div>
+          {error && (
+            <div style={{ background: '#450a0a', border: '1px solid #7f1d1d', borderRadius: 8, padding: 12, marginBottom: 16, color: '#fca5a5', fontSize: 14 }}>
+              {error}
+            </div>
+          )}
+          <input
+            type="password"
+            placeholder="Admin password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && login()}
+            style={{ width: '100%', background: '#0f172a', border: '1px solid #334155', borderRadius: 8, padding: '12px 16px', color: '#f1f5f9', fontSize: 15, boxSizing: 'border-box', outline: 'none', marginBottom: 16 }}
+          />
+          <button
+            onClick={login}
+            disabled={loading || !password}
+            style={{ width: '100%', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 8, padding: '12px 0', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}
+          >
+            {loading ? 'Signing in…' : 'Sign In'}
+          </button>
         </div>
-        <form onSubmit={handleLogin}>
-          <label style={{color:'#94a3b8',fontSize:13,display:'block',marginBottom:6}}>PASSWORD</label>
-          <input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="Admin password"
-            style={{width:'100%',padding:'12px 14px',borderRadius:8,border:'1px solid #334155',background:'#0f172a',color:'white',fontSize:15,boxSizing:'border-box'}} autoFocus />
-          {error && <p style={{color:'#f87171',fontSize:13,margin:'8px 0 0'}}>{error}</p>}
-          <button type="submit" style={{width:'100%',marginTop:16,padding:13,borderRadius:8,background:'#3b82f6',color:'white',border:'none',fontSize:15,fontWeight:700,cursor:'pointer'}}>Sign In</button>
-        </form>
       </div>
-    </div>
-  );
+    );
+  }
 
   return (
-    <div style={{minHeight:'100vh',background:'#0f172a',color:'white',fontFamily:'system-ui,sans-serif'}}>
-      <div style={{background:'#1e293b',borderBottom:'1px solid #334155',padding:'16px 32px',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-        <div style={{display:'flex',alignItems:'center',gap:12}}>
-          <span style={{fontSize:24}}>🏥</span>
+    <div style={{ minHeight: '100vh', background: '#0f172a', fontFamily: 'system-ui, sans-serif', display: 'flex', flexDirection: 'column' }}>
+      {/* Header */}
+      <div style={{ background: '#1e293b', borderBottom: '1px solid #334155', padding: '16px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: 24 }}>🏥</span>
           <div>
-            <h1 style={{margin:0,fontSize:18,fontWeight:700}}>VoiceIntake Admin</h1>
-            <p style={{margin:0,fontSize:12,color:'#64748b'}}>Global Neuro and Spine Institute</p>
+            <h1 style={{ color: '#f1f5f9', fontSize: 18, fontWeight: 700, margin: 0 }}>VoiceIntake Admin</h1>
+            <p style={{ color: '#64748b', fontSize: 12, margin: 0 }}>Global Neuro &amp; Spine Institute</p>
           </div>
         </div>
-        <div style={{display:'flex',gap:12}}>
-          <button onClick={()=>fetchIntakes(storedPw)} style={{padding:'8px 16px',borderRadius:8,background:'#334155',color:'#94a3b8',border:'none',cursor:'pointer',fontSize:13}}>Refresh</button>
-          <button onClick={handleLogout} style={{padding:'8px 16px',borderRadius:8,background:'#334155',color:'#94a3b8',border:'none',cursor:'pointer',fontSize:13}}>Sign Out</button>
-        </div>
+        <button
+          onClick={() => { setAuthenticated(false); setIntakes([]); setPassword(''); }}
+          style={{ background: 'transparent', border: '1px solid #334155', color: '#94a3b8', borderRadius: 6, padding: '6px 14px', cursor: 'pointer', fontSize: 13 }}
+        >
+          Sign Out
+        </button>
       </div>
-      <div style={{padding:32}}>
-        <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:16,marginBottom:32}}>
-          {[['Total',stats.total,'#3b82f6'],['Complete',stats.complete,'#22c55e'],['Partial',stats.partial,'#f59e0b'],['New Patients',stats.newP,'#8b5cf6'],['Follow-Ups',stats.fu,'#06b6d4']].map(([label,val,color])=>(
-            <div key={label} style={{background:'#1e293b',borderRadius:12,padding:20,border:'1px solid #334155'}}>
-              <div style={{fontSize:28,fontWeight:700,color}}>{val}</div>
-              <div style={{fontSize:13,color:'#64748b',marginTop:2}}>{label}</div>
+
+      {/* Stats */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, padding: '20px 24px 0' }}>
+        {[
+          { label: 'Total Intakes', value: stats.total, color: '#3b82f6' },
+          { label: 'Today', value: stats.today, color: '#10b981' },
+          { label: 'New Patients', value: stats.newPatients, color: '#8b5cf6' },
+          { label: 'Follow-Ups', value: stats.followUps, color: '#f59e0b' },
+        ].map(s => (
+          <div key={s.label} style={{ background: '#1e293b', borderRadius: 10, padding: 20, borderTop: `3px solid ${s.color}` }}>
+            <div style={{ color: s.color, fontSize: 28, fontWeight: 700 }}>{s.value}</div>
+            <div style={{ color: '#94a3b8', fontSize: 13, marginTop: 4 }}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filters */}
+      <div style={{ padding: '16px 24px', display: 'flex', gap: 12 }}>
+        <input
+          type="text"
+          placeholder="Search by name or complaint…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{ flex: 1, background: '#1e293b', border: '1px solid #334155', borderRadius: 8, padding: '10px 14px', color: '#f1f5f9', fontSize: 14, outline: 'none' }}
+        />
+        <select
+          value={typeFilter}
+          onChange={e => setTypeFilter(e.target.value)}
+          style={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8, padding: '10px 14px', color: '#f1f5f9', fontSize: 14, outline: 'none' }}
+        >
+          <option value="all">All Types</option>
+          <option value="new_patient">New Patient</option>
+          <option value="follow_up">Follow-Up</option>
+        </select>
+      </div>
+
+      {/* Main content */}
+      <div style={{ flex: 1, display: 'flex', gap: 0, padding: '0 24px 24px', overflow: 'hidden' }}>
+        {/* List */}
+        <div style={{ flex: selected ? '0 0 420px' : '1', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingRight: selected ? 16 : 0 }}>
+          {filtered.length === 0 && (
+            <div style={{ color: '#64748b', textAlign: 'center', padding: 40 }}>
+              {intakes.length === 0 ? 'No intakes yet.' : 'No results match your search.'}
+            </div>
+          )}
+          {filtered.map(i => (
+            <div
+              key={i.callSid}
+              onClick={() => setSelected(selected?.callSid === i.callSid ? null : i)}
+              style={{
+                background: selected?.callSid === i.callSid ? '#1e3a5f' : '#1e293b',
+                border: `1px solid ${selected?.callSid === i.callSid ? '#3b82f6' : '#334155'}`,
+                borderRadius: 10,
+                padding: 16,
+                cursor: 'pointer',
+                transition: 'all 0.15s',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div>
+                  <div style={{ color: '#f1f5f9', fontWeight: 600, fontSize: 15 }}>{i.patientName || 'Unknown'}</div>
+                  <div style={{ color: '#94a3b8', fontSize: 13, marginTop: 3 }}>{i.chiefComplaint || 'No chief complaint'}</div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <span style={{
+                    background: i.visitType === 'follow_up' ? '#422006' : '#1a1a4e',
+                    color: i.visitType === 'follow_up' ? '#fb923c' : '#818cf8',
+                    borderRadius: 4,
+                    padding: '2px 8px',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    textTransform: 'uppercase',
+                  }}>
+                    {i.visitType === 'follow_up' ? 'Follow-Up' : 'New'}
+                  </span>
+                  <div style={{ color: '#64748b', fontSize: 11, marginTop: 4 }}>
+                    {i.completedAt ? new Date(i.completedAt).toLocaleString() : '—'}
+                  </div>
+                </div>
+              </div>
             </div>
           ))}
         </div>
-        <div style={{display:'flex',gap:12,marginBottom:20,flexWrap:'wrap'}}>
-          <input type="text" placeholder="Search name, complaint, phone..." value={search} onChange={e=>setSearch(e.target.value)}
-            style={{flex:1,minWidth:240,padding:'10px 14px',borderRadius:8,border:'1px solid #334155',background:'#1e293b',color:'white',fontSize:14}} />
-          <select value={filterType} onChange={e=>setFilterType(e.target.value)} style={{padding:'10px 14px',borderRadius:8,border:'1px solid #334155',background:'#1e293b',color:'white',fontSize:14}}>
-            <option value="">All Visit Types</option>
-            <option value="new_patient">New Patients</option>
-            <option value="follow_up">Follow-Ups</option>
-          </select>
-          <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)} style={{padding:'10px 14px',borderRadius:8,border:'1px solid #334155',background:'#1e293b',color:'white',fontSize:14}}>
-            <option value="">All Statuses</option>
-            <option value="complete">Complete</option>
-            <option value="partial">Partial</option>
-          </select>
-        </div>
-        <div style={{display:'grid',gridTemplateColumns:selected?'1fr 400px':'1fr',gap:24}}>
-          <div>
-            {loading && <div style={{color:'#64748b',padding:40,textAlign:'center'}}>Loading...</div>}
-            {!loading&&filtered.length===0&&<div style={{color:'#64748b',padding:60,textAlign:'center',background:'#1e293b',borderRadius:12}}>No intakes yet. Completed calls will appear here.</div>}
-            {filtered.map(i=>(
-              <div key={i.call_id} onClick={()=>setSelected(selected?.call_id===i.call_id?null:i)}
-                style={{background:selected?.call_id===i.call_id?'#1e3a5f':'#1e293b',border:'1px solid '+(selected?.call_id===i.call_id?'#3b82f6':'#334155'),borderRadius:10,padding:'16px 20px',cursor:'pointer',marginBottom:8,display:'flex',alignItems:'center',gap:16}}>
-                <div style={{flex:1}}>
-                  <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
-                    <span style={{fontWeight:700,fontSize:15}}>{i.full_name||'Unknown Patient'}</span>
-                    <span style={{fontSize:11,padding:'2px 8px',borderRadius:20,background:i.visit_type==='new_patient'?'#1e1b4b':'#082f49',color:i.visit_type==='new_patient'?'#a78bfa':'#38bdf8',fontWeight:600}}>{i.visit_type==='new_patient'?'NEW':'FOLLOW-UP'}</span>
-                    <span style={{fontSize:11,padding:'2px 8px',borderRadius:20,background:i.completion_status==='complete'?'#052e16':'#422006',color:i.completion_status==='complete'?'#4ade80':'#fb923c',fontWeight:600}}>{i.completion_status==='complete'?'Complete':'Partial'}</span>
-                  </div>
-                  <div style={{color:'#94a3b8',fontSize:13,marginTop:4}}>{i.chief_complaint||'No complaint'}{i.pain_severity?' - Pain: '+i.pain_severity+'/10':''}</div>
-                  <div style={{color:'#475569',fontSize:12,marginTop:2}}>{i.completed_at?new Date(i.completed_at).toLocaleString():''}{i.caller_phone?' - '+i.caller_phone:''}</div>
-                </div>
-                <div style={{color:'#475569',fontSize:20}}>{'>'}</div>
-              </div>
-            ))}
-          </div>
-          {selected&&(
-            <div style={{background:'#1e293b',border:'1px solid #334155',borderRadius:12,overflow:'hidden',position:'sticky',top:32,maxHeight:'calc(100vh - 100px)',overflowY:'auto'}}>
-              <div style={{padding:'16px 20px',background:'#1e3a5f',display:'flex',justifyContent:'space-between',alignItems:'center',position:'sticky',top:0}}>
-                <div>
-                  <div style={{fontWeight:700,fontSize:16}}>{selected.full_name||'Unknown'}</div>
-                  <div style={{fontSize:12,color:'#93c5fd'}}>{selected.visit_type==='new_patient'?'New Patient':'Follow-Up'}</div>
-                </div>
-                <button onClick={()=>setSelected(null)} style={{background:'none',border:'none',color:'#94a3b8',cursor:'pointer',fontSize:20}}>x</button>
-              </div>
-              <div style={{padding:20}}>
-                {[['Chief Complaint',selected.chief_complaint],['Pain Location',selected.pain_location],['Severity',selected.pain_severity?selected.pain_severity+'/10':null],['Pain Description',selected.pain_description],['Worse When',selected.pain_worse],['Better When',selected.pain_better],['Medications',selected.medications],['Allergies',selected.allergies],['Conditions',selected.medical_conditions],['Surgeries',selected.surgeries],['Family Hx',selected.family_history],['Marital',selected.marital_status],['Employment',selected.employment],['Smoking',selected.smoking],['Alcohol',selected.alcohol],['Disability',selected.disability],['Review of Systems',selected.review_of_systems],['Pregnant',selected.pregnant],['Consent',selected.consent_given],['DOB',selected.dob],['Ht/Wt',[selected.height,selected.weight].filter(Boolean).join(' / ')||null],['Cause',selected.cause],['Phone',selected.caller_phone],['Call ID',selected.call_id],['Date',selected.completed_at?new Date(selected.completed_at).toLocaleString():null]].filter(([_,v])=>v&&v!=='null').map(([label,value])=>(
-                  <div key={label} style={{marginBottom:14,paddingBottom:14,borderBottom:'1px solid #0f172a'}}>
-                    <div style={{fontSize:11,color:'#64748b',fontWeight:600,textTransform:'uppercase',marginBottom:3}}>{label}</div>
-                    <div style={{fontSize:14,color:'#e2e8f0',lineHeight:1.5}}>{value}</div>
-                  </div>
-                ))}
+
+        {/* Detail Panel */}
+        {selected && (
+          <div style={{ flex: 1, background: '#1e293b', borderRadius: 12, border: '1px solid #334155', overflowY: 'auto', padding: 24 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h2 style={{ color: '#f1f5f9', fontSize: 18, fontWeight: 700, margin: 0 }}>{selected.patientName}</h2>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  onClick={() => downloadPDF(selected)}
+                  style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
+                >
+                  📄 Download PDF
+                </button>
+                <button
+                  onClick={() => setSelected(null)}
+                  style={{ background: 'transparent', border: '1px solid #334155', color: '#94a3b8', borderRadius: 6, padding: '8px 14px', cursor: 'pointer', fontSize: 13 }}
+                >
+                  ✕
+                </button>
               </div>
             </div>
-          )}
-        </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              {[
+                { label: 'Visit Type', value: selected.visitType === 'follow_up' ? 'Follow-Up' : 'New Patient' },
+                { label: 'Completed', value: selected.completedAt ? new Date(selected.completedAt).toLocaleString() : '—' },
+                { label: 'Chief Complaint', value: selected.chiefComplaint || selected.intakeData?.chief_complaint || '—' },
+                { label: 'Pain Location', value: selected.intakeData?.pain_location || '—' },
+                { label: 'Pain Severity', value: selected.intakeData?.pain_severity || '—' },
+                { label: 'Pain Description', value: selected.intakeData?.pain_description || '—' },
+                { label: 'Cause of Pain', value: selected.intakeData?.cause || '—' },
+                { label: 'Radiating', value: selected.intakeData?.pain_radiation || '—' },
+                { label: 'Pain Worse', value: selected.intakeData?.pain_worse || '—' },
+                { label: 'Pain Better', value: selected.intakeData?.pain_better || '—' },
+                { label: 'Treatments Tried', value: selected.intakeData?.treatments || '—' },
+                { label: 'Medications', value: selected.intakeData?.medications || '—' },
+                { label: 'Allergies', value: selected.intakeData?.allergies || '—' },
+                { label: 'Medical Conditions', value: selected.intakeData?.medical_conditions || '—' },
+                { label: 'Prior Surgeries', value: selected.intakeData?.surgeries || '—' },
+                { label: 'Hospitalizations', value: selected.intakeData?.hospitalizations || '—' },
+                { label: 'Family History', value: selected.intakeData?.family_history || '—' },
+                { label: 'Marital Status', value: selected.intakeData?.marital_status || '—' },
+                { label: 'Employment', value: selected.intakeData?.employment || '—' },
+                { label: 'Smoking', value: selected.intakeData?.smoking || '—' },
+                { label: 'Alcohol', value: selected.intakeData?.alcohol || '—' },
+                { label: 'Disability Claim', value: selected.intakeData?.disability || '—' },
+                { label: 'Date of Birth', value: selected.intakeData?.dob || '—' },
+                { label: 'Height / Weight', value: selected.intakeData?.height && selected.intakeData?.weight ? `${selected.intakeData.height} / ${selected.intakeData.weight}` : '—' },
+              ].map(field => (
+                <div key={field.label} style={{ background: '#0f172a', borderRadius: 8, padding: 12 }}>
+                  <div style={{ color: '#64748b', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{field.label}</div>
+                  <div style={{ color: '#e2e8f0', fontSize: 14, marginTop: 4 }}>{field.value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
-                                                                                                                                                                                                   }
+}
