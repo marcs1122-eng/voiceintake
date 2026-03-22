@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
+import { kv } from '@vercel/kv';
 import PDFDocument from 'pdfkit';
 import { Resend } from 'resend';
 
@@ -252,6 +253,27 @@ export async function POST(request) {
     });
 
     console.log('[call/complete] Email sent to ' + practiceEmail + ' for ' + patientName);
+
+    // Save intake record to KV for admin dashboard
+    try {
+      const record = {
+        callSid: conversationId,
+        patientName,
+        visitType: intakeData.visit_type || 'new_patient',
+        chiefComplaint: intakeData.chief_complaint || null,
+        callDuration,
+        practiceEmail,
+        intakeData,
+        completedAt: new Date().toISOString(),
+      };
+      await kv.set('intake:' + conversationId, record);
+      await kv.lpush('intakes:index', conversationId);
+      await kv.ltrim('intakes:index', 0, 499);
+      console.log('[call/complete] Intake saved to KV:', conversationId);
+    } catch (kvErr) {
+      console.error('[call/complete] KV save failed (non-fatal):', kvErr.message);
+    }
+
     return Response.json({ success: true, patient: patientName, email_sent_to: practiceEmail });
 
   } catch (error) {
