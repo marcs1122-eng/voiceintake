@@ -83,6 +83,7 @@ async function triggerPDF(session, callDuration) {
       body: JSON.stringify({
         data: {
           transcript,
+          allResponses: session.allResponses,
           conversation_id: session.callSid,
           metadata: { call_duration_secs: callDuration || 0 },
         },
