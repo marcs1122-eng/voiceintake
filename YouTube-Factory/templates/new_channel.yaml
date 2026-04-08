@@ -1,0 +1,82 @@
+# ============================================================================
+# Template: Copy this block into config/channels.yaml to add a new channel.
+# Replace all PLACEHOLDER values with your channel's settings.
+# ============================================================================
+
+# your_channel_id:                        # lowercase, underscores, no spaces
+#   name: "Your Channel Name"
+#   tagline: "Your Tagline"
+#   niche: "your_niche"                   # e.g. tech_review, cooking, gaming
+#   description: "What your channel is about"
+#   tone: "your tone keywords"            # e.g. "funny, energetic, casual"
+#   target_audience: "Who watches"
+#
+#   content:
+#     long_form:
+#       min_duration: 300
+#       max_duration: 1200
+#       target_duration: 600
+#       style: "your_style"               # narration, tutorial, review, etc.
+#       intro_hook_seconds: 10
+#       chapters: true
+#     shorts:
+#       min_duration: 15
+#       max_duration: 60
+#       target_duration: 30
+#       extract_count: 3
+#       style: "highlight_clip"
+#
+#   voice:
+#     provider: "atlas"
+#     voice_id: "atlas_default"
+#     speed: 1.0
+#     pitch: 0
+#     style: "conversational"
+#
+#   visuals:
+#     style: "modern_clean"
+#     color_palette: ["#FFFFFF", "#000000", "#FF0000", "#0066FF"]
+#     aspect_ratio: "16:9"
+#     thumbnail:
+#       style: "bold_text"
+#       text_position: "center"
+#       font: "Arial"
+#       overlay: "gradient"
+#     image_prompt_prefix: "professional high quality "
+#     negative_prompts: "low quality, blurry"
+#
+#   seo:
+#     primary_keywords:
+#       - "keyword1"
+#       - "keyword2"
+#     hashtags:
+#       - "#YourChannel"
+#       - "#Keyword"
+#     category: "Entertainment"
+#     default_language: "en"
+#
+#   schedule:
+#     timezone: "America/New_York"
+#     long_form:
+#       days: ["tuesday", "friday"]
+#       time: "17:00"
+#       frequency: "twice_weekly"
+#     shorts:
+#       days: ["monday", "wednesday", "thursday"]
+#       time: "12:00"
+#       frequency: "daily"
+#
+#   distribution:
+#     youtube: true
+#     tiktok: true
+#     instagram_reels: true
+#     tiktok_handle: "@yourchannel"
+#     instagram_handle: "@yourchannel"
+#
+#   research:
+#     sources:
+#       - "web_search"
+#       - "trending_topics"
+#     fact_check: true
+#     sensitivity_filter: "medium"
+#     avoid_topics: []

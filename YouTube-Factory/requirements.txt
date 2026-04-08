@@ -1,0 +1,29 @@
+# YouTube AI Factory - Dependencies
+# Install: pip install -r requirements.txt
+
+# Core
+pyyaml>=6.0
+httpx>=0.27.0
+
+# LLM
+anthropic>=0.40.0
+
+# Image/Video Generation (Higgsfield SDK)
+higgsfield>=0.1.0
+
+# YouTube Upload
+google-api-python-client>=2.100.0
+google-auth>=2.25.0
+google-auth-oauthlib>=1.2.0
+
+# Image Processing
+Pillow>=10.0.0
+
+# Video Processing (ffmpeg must be installed on system)
+# sudo apt install ffmpeg  OR  brew install ffmpeg
+
+# Optional: Enhanced async support
+anyio>=4.0.0
+
+# Optional: TikTok/Instagram APIs
+# (included via httpx for REST calls)

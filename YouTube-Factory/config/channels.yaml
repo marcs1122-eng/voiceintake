@@ -1,0 +1,206 @@
+# ============================================================================
+# YouTube AI Factory - Channel Configuration
+# Add new channels by copying a channel block and adjusting values.
+# The orchestrator auto-discovers channels from this file.
+# ============================================================================
+
+channels:
+  dark_verdict:
+    name: "Dark Verdict"
+    tagline: "Justice Never Sleeps"
+    niche: "true_crime"
+    description: "Deep-dive true crime stories with cinematic narration and haunting visuals"
+    tone: "dark, suspenseful, investigative, documentary-style"
+    target_audience: "True crime enthusiasts, mystery lovers, 18-45 demographic"
+
+    content:
+      long_form:
+        min_duration: 600        # 10 minutes
+        max_duration: 1800       # 30 minutes
+        target_duration: 900     # 15 minutes sweet spot
+        style: "documentary_narration"
+        intro_hook_seconds: 15
+        chapters: true
+      shorts:
+        min_duration: 30
+        max_duration: 60
+        target_duration: 45
+        extract_count: 3         # shorts per long-form video
+        style: "cliffhanger_teaser"
+
+    voice:
+      provider: "atlas"
+      voice_id: "atlas_noir_male_01"
+      speed: 0.95
+      pitch: -2
+      style: "documentary"
+
+    visuals:
+      style: "dark_cinematic"
+      color_palette: ["#1a1a2e", "#16213e", "#0f3460", "#e94560"]
+      aspect_ratio: "16:9"
+      thumbnail:
+        style: "dramatic_face_close_up"
+        text_position: "bottom_third"
+        font: "Impact"
+        overlay: "dark_vignette"
+      image_prompt_prefix: "cinematic dark moody true crime documentary style, noir lighting, "
+      negative_prompts: "cartoon, anime, bright colors, happy, cheerful"
+
+    seo:
+      primary_keywords:
+        - "true crime"
+        - "unsolved cases"
+        - "murder mystery"
+        - "cold case"
+        - "criminal investigation"
+      hashtags:
+        - "#TrueCrime"
+        - "#DarkVerdict"
+        - "#UnsolvedMysteries"
+        - "#ColdCase"
+        - "#CriminalJustice"
+      category: "Entertainment"
+      default_language: "en"
+
+    schedule:
+      timezone: "America/New_York"
+      long_form:
+        days: ["tuesday", "friday"]
+        time: "18:00"
+        frequency: "twice_weekly"
+      shorts:
+        days: ["monday", "wednesday", "thursday", "saturday"]
+        time: "12:00"
+        frequency: "daily"
+
+    distribution:
+      youtube: true
+      tiktok: true
+      instagram_reels: true
+      tiktok_handle: "@darkverdict"
+      instagram_handle: "@darkverdict"
+
+    research:
+      sources:
+        - "court_records"
+        - "news_archives"
+        - "public_databases"
+        - "documentary_transcripts"
+      fact_check: true
+      sensitivity_filter: "high"
+      avoid_topics:
+        - "active_investigations"
+        - "minor_victims_named"
+
+  trailer_trash:
+    name: "Trailer Trash"
+    tagline: "Fake Movies. Real Entertainment."
+    niche: "fake_movie_trailers"
+    description: "Hilariously absurd fake movie trailers with Hollywood production quality"
+    tone: "comedic, over-the-top, satirical, blockbuster parody"
+    target_audience: "Comedy lovers, movie buffs, meme culture, 16-35 demographic"
+
+    content:
+      long_form:
+        min_duration: 120        # 2 minutes
+        max_duration: 300        # 5 minutes
+        target_duration: 180     # 3 minutes
+        style: "movie_trailer"
+        intro_hook_seconds: 5
+        chapters: false
+      shorts:
+        min_duration: 15
+        max_duration: 60
+        target_duration: 30
+        extract_count: 2
+        style: "best_moment_clip"
+
+    voice:
+      provider: "atlas"
+      voice_id: "atlas_epic_male_02"
+      speed: 1.05
+      pitch: 0
+      style: "movie_trailer_announcer"
+
+    visuals:
+      style: "blockbuster_cinematic"
+      color_palette: ["#ff6600", "#ffd700", "#1a1a1a", "#ffffff"]
+      aspect_ratio: "16:9"
+      thumbnail:
+        style: "movie_poster"
+        text_position: "center"
+        font: "Bebas Neue"
+        overlay: "cinematic_bars"
+      image_prompt_prefix: "hollywood blockbuster movie still, cinematic lighting, 8k, "
+      negative_prompts: "low quality, amateur, webcam, screenshot"
+
+    seo:
+      primary_keywords:
+        - "fake movie trailer"
+        - "parody trailer"
+        - "comedy trailer"
+        - "AI movie"
+        - "funny trailer"
+      hashtags:
+        - "#TrailerTrash"
+        - "#FakeTrailer"
+        - "#MovieParody"
+        - "#AIMovie"
+        - "#ComedyTrailer"
+      category: "Comedy"
+      default_language: "en"
+
+    schedule:
+      timezone: "America/New_York"
+      long_form:
+        days: ["monday", "wednesday", "friday"]
+        time: "16:00"
+        frequency: "three_weekly"
+      shorts:
+        days: ["tuesday", "thursday", "saturday", "sunday"]
+        time: "11:00"
+        frequency: "daily"
+
+    distribution:
+      youtube: true
+      tiktok: true
+      instagram_reels: true
+      tiktok_handle: "@trailertrashai"
+      instagram_handle: "@trailertrashai"
+
+    research:
+      sources:
+        - "trending_movies"
+        - "box_office_data"
+        - "movie_tropes_database"
+        - "meme_trends"
+      fact_check: false
+      sensitivity_filter: "medium"
+      avoid_topics:
+        - "real_tragedies"
+        - "political_figures"
+
+# ============================================================================
+# Global defaults (inherited by all channels unless overridden)
+# ============================================================================
+defaults:
+  output_dir: "./output"
+  max_concurrent_jobs: 3
+  retry_attempts: 3
+  retry_delay: 5
+  quality_threshold: 0.7       # minimum quality score to publish
+  auto_publish: false           # require manual approval by default
+  watermark: false
+
+  api_providers:
+    llm: "anthropic"
+    image: "higgsfield"
+    video: "kling"
+    voice: "atlas"
+
+  rate_limits:
+    youtube_uploads_per_day: 10
+    tiktok_uploads_per_day: 5
+    instagram_uploads_per_day: 5
+    api_calls_per_minute: 30

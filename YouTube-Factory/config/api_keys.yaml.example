@@ -1,0 +1,37 @@
+# ============================================================================
+# API Keys Configuration - COPY to api_keys.yaml and fill in your keys
+# NEVER commit api_keys.yaml to version control!
+# ============================================================================
+
+anthropic:
+  api_key: "sk-ant-XXXX"
+  model: "claude-sonnet-4-6"
+
+higgsfield:
+  api_key: "hf-XXXX"
+  base_url: "https://api.higgsfield.ai/v1"
+
+kling:
+  api_key: "kling-XXXX"
+  base_url: "https://api.kling.ai/v1"
+
+atlas:
+  api_key: "atlas-XXXX"
+  base_url: "https://api.atlas.ai/v1"
+
+youtube:
+  client_id: "XXXX.apps.googleusercontent.com"
+  client_secret: "XXXX"
+  refresh_token: "XXXX"
+
+tiktok:
+  client_key: "XXXX"
+  client_secret: "XXXX"
+  access_token: "XXXX"
+
+instagram:
+  access_token: "XXXX"
+  business_account_id: "XXXX"
+
+serpapi:
+  api_key: "XXXX"
