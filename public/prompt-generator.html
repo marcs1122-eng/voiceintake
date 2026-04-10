@@ -1,0 +1,758 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI Image + Video Prompt Generator</title>
+<style>
+  :root {
+    --bg1: #0b1120;
+    --bg2: #1e1b4b;
+    --panel: #111827;
+    --panel-2: #0b1120;
+    --border: #1f2937;
+    --border-2: #334155;
+    --text: #e2e8f0;
+    --text-dim: #94a3b8;
+    --text-mute: #64748b;
+    --accent-a: #ec4899;
+    --accent-b: #8b5cf6;
+    --accent-c: #3b82f6;
+    --accent-img: #60a5fa;
+    --accent-video: #a78bfa;
+    --accent-narr: #f472b6;
+    --accent-end: #34d399;
+    --danger-bg: #7f1d1d;
+    --danger-border: #dc2626;
+    --danger-text: #fecaca;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: linear-gradient(180deg, var(--bg1) 0%, var(--bg2) 100%);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      "Helvetica Neue", Arial, sans-serif;
+    min-height: 100vh;
+  }
+  main { padding: 40px 20px; }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 {
+    margin: 0;
+    font-size: 36px;
+    font-weight: 800;
+    background: linear-gradient(90deg, #f472b6 0%, #a78bfa 50%, #60a5fa 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    color: transparent;
+  }
+  header p {
+    margin: 8px 0 0;
+    color: var(--text-dim);
+    font-size: 15px;
+    line-height: 1.55;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    margin-bottom: 16px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+  }
+  label.ll {
+    display: block;
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+    font-weight: 700;
+  }
+  input[type="text"],
+  input[type="password"] {
+    width: 100%;
+    background: var(--panel-2);
+    border: 1px solid var(--border-2);
+    border-radius: 10px;
+    padding: 13px 15px;
+    color: #f1f5f9;
+    font-size: 16px;
+    outline: none;
+    font-family: inherit;
+  }
+  input:focus { border-color: var(--accent-b); }
+  .row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .grow { flex: 1; min-width: 0; }
+  .pill {
+    background: var(--panel-2);
+    border: 1px solid var(--border-2);
+    border-radius: 10px;
+    padding: 10px 14px;
+    cursor: pointer;
+    text-align: left;
+    color: var(--text);
+    font-family: inherit;
+  }
+  .pill.active {
+    background: rgba(139, 92, 246, 0.18);
+    border-color: var(--accent-b);
+  }
+  .pill .t { font-size: 14px; font-weight: 700; }
+  .pill .s { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+  button.primary {
+    background: linear-gradient(90deg, var(--accent-a), var(--accent-b), var(--accent-c));
+    color: white;
+    border: none;
+    border-radius: 10px;
+    padding: 12px 26px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    letter-spacing: 0.3px;
+    font-family: inherit;
+  }
+  button.primary:disabled {
+    background: #475569;
+    cursor: not-allowed;
+  }
+  button.ghost {
+    background: #1f2937;
+    border: 1px solid var(--border-2);
+    border-radius: 8px;
+    padding: 8px 14px;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .err {
+    margin-top: 18px;
+    padding: 14px 16px;
+    background: var(--danger-bg);
+    border: 1px solid var(--danger-border);
+    border-radius: 10px;
+    color: var(--danger-text);
+  }
+  .muted {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 14px;
+    padding: 18px 0;
+  }
+  .scene {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px;
+    margin-bottom: 14px;
+  }
+  .scene .head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .chip {
+    background: linear-gradient(90deg, var(--accent-a), var(--accent-b));
+    color: white;
+    font-weight: 800;
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    letter-spacing: 0.4px;
+  }
+  .dur { font-size: 13px; color: var(--text-dim); }
+  .cam { font-size: 12px; color: var(--text-mute); }
+  .block {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent-b);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+  }
+  .block .bhead {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+  .block .bl {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 700;
+  }
+  .block .bv {
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+  }
+  .copybtn {
+    background: transparent;
+    border: 1px solid var(--border-2);
+    color: #cbd5e1;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+  }
+  .meta {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+  }
+  .meta .ll2 {
+    font-size: 11px;
+    color: var(--text-mute);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .meta .vv {
+    margin-top: 4px;
+    font-size: 14px;
+    color: #cbd5e1;
+  }
+  .char {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 14px;
+    color: #cbd5e1;
+    margin-bottom: 8px;
+  }
+  .char strong { color: #f1f5f9; }
+  .summary h2 { margin: 6px 0 4px; font-size: 24px; }
+  .summary .tag {
+    font-size: 12px;
+    color: var(--text-mute);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  .summary .log {
+    margin: 0;
+    color: #cbd5e1;
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  .spread {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  details.keywrap { margin-top: 14px; }
+  details.keywrap summary {
+    cursor: pointer;
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+  .hint {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--text-mute);
+    line-height: 1.5;
+  }
+  a { color: #93c5fd; }
+</style>
+</head>
+<body>
+<main>
+<div class="wrap">
+  <header style="margin-bottom:22px">
+    <h1>AI Image + Video Prompt Generator</h1>
+    <p>
+      Type a theme. Get a full storyboard with image prompts, Veo 3.0 video
+      prompts, and narration for a YouTube Short or a 5-minute video. Each
+      scene's end frame is the next scene's start frame, so your clips chain
+      into one seamless video.
+    </p>
+  </header>
+
+  <div class="card">
+    <label class="ll" for="theme">Theme</label>
+    <input
+      id="theme"
+      type="text"
+      placeholder="e.g. Dogs speaking to other dog, humorous"
+      autofocus
+    />
+
+    <div class="row" style="margin-top:14px">
+      <button type="button" class="pill active" data-format="short" id="pill-short">
+        <div class="t">YouTube Short</div>
+        <div class="s">2 clips &middot; 30s total</div>
+      </button>
+      <button type="button" class="pill" data-format="video" id="pill-video">
+        <div class="t">YouTube Video</div>
+        <div class="s">~38 clips &middot; 5 min total</div>
+      </button>
+      <div class="grow"></div>
+      <button id="go" class="primary" disabled>Generate Storyboard</button>
+    </div>
+
+    <details class="keywrap">
+      <summary>Anthropic API key (stored only in your browser)</summary>
+      <div style="margin-top:10px">
+        <input
+          id="apikey"
+          type="password"
+          placeholder="sk-ant-api03-..."
+          autocomplete="off"
+        />
+        <div class="hint">
+          This HTML file calls the Claude API directly from your browser. Your
+          key is saved in <code>localStorage</code> on this device only. Get a
+          key from console.anthropic.com.
+        </div>
+      </div>
+    </details>
+  </div>
+
+  <div id="error" class="err" style="display:none"></div>
+  <div id="loading" class="muted" style="display:none"></div>
+  <div id="output"></div>
+</div>
+</main>
+
+<script>
+(function () {
+  var themeEl = document.getElementById("theme");
+  var keyEl = document.getElementById("apikey");
+  var goBtn = document.getElementById("go");
+  var pillShort = document.getElementById("pill-short");
+  var pillVideo = document.getElementById("pill-video");
+  var errEl = document.getElementById("error");
+  var loadEl = document.getElementById("loading");
+  var outEl = document.getElementById("output");
+
+  var format = "short";
+
+  // Restore saved key
+  try {
+    var savedKey = localStorage.getItem("anthropic_api_key") || "";
+    if (savedKey) keyEl.value = savedKey;
+  } catch (e) {}
+
+  keyEl.addEventListener("change", function () {
+    try {
+      localStorage.setItem("anthropic_api_key", keyEl.value.trim());
+    } catch (e) {}
+  });
+
+  function updateGoState() {
+    goBtn.disabled = !themeEl.value.trim();
+  }
+  themeEl.addEventListener("input", updateGoState);
+  updateGoState();
+
+  function setFormat(f) {
+    format = f;
+    if (f === "short") {
+      pillShort.classList.add("active");
+      pillVideo.classList.remove("active");
+    } else {
+      pillVideo.classList.add("active");
+      pillShort.classList.remove("active");
+    }
+  }
+  pillShort.addEventListener("click", function () { setFormat("short"); });
+  pillVideo.addEventListener("click", function () { setFormat("video"); });
+
+  function showError(msg) {
+    errEl.textContent = msg;
+    errEl.style.display = "block";
+  }
+  function clearError() {
+    errEl.style.display = "none";
+    errEl.textContent = "";
+  }
+  function setLoading(on, msg) {
+    loadEl.style.display = on ? "block" : "none";
+    loadEl.textContent = msg || "";
+  }
+
+  function buildSystemPrompt(format) {
+    var isShort = format === "short";
+    var sceneCount = isShort ? 2 : 38;
+    var sceneSeconds = isShort ? 15 : 8;
+    var totalSeconds = isShort ? 30 : 300;
+    var totalLabel = isShort ? "30-second YouTube Short" : "5-minute YouTube video";
+    var narrWords = Math.round(sceneSeconds * 2.3);
+
+    return [
+      "You are a world-class AI video director and prompt engineer.",
+      "Your job: turn a single theme into a fully-storyboarded, narrator-driven",
+      "video, specified as a sequence of scenes that can be produced with an",
+      "image generator (for keyframes) and Google Veo 3.0 (for image-to-video).",
+      "",
+      "TARGET FORMAT: " + totalLabel + ".",
+      "TOTAL SCENES: exactly " + sceneCount + ".",
+      "EACH SCENE DURATION: " + sceneSeconds + " seconds.",
+      "TOTAL DURATION: " + totalSeconds + " seconds.",
+      "",
+      "CRITICAL CONTINUITY RULE:",
+      "The endImagePrompt of scene N MUST be IDENTICAL to the startImagePrompt",
+      "of scene N+1. This is how we chain Veo 3.0 clips into one continuous",
+      "video: the last frame of a clip is the first frame of the next clip.",
+      "Scene 1 has a fresh startImagePrompt. The final scene has an endImagePrompt",
+      "that provides a satisfying visual resolution (it is not reused).",
+      "",
+      "IMAGE PROMPT GUIDELINES (for startImagePrompt and endImagePrompt):",
+      "- Write a single rich paragraph, 40-80 words.",
+      "- Describe subject, action/pose, setting, lighting, mood, color palette,",
+      "  camera lens, composition, and rendering style (cinematic photo, Pixar",
+      "  3D, anime, claymation, etc.).",
+      "- Lock in CONSISTENT character details (species, fur color, clothing,",
+      "  personality quirks, proportions) so the same characters reappear across",
+      "  scenes without drifting. Repeat those locked descriptors every time the",
+      "  character is on screen.",
+      "- Do NOT reference other scenes by number. Each prompt must be self-contained.",
+      "",
+      "VIDEO PROMPT GUIDELINES (for videoPrompt - Veo 3.0):",
+      "- 30-60 words describing the MOTION between the start and end frames.",
+      "- Specify: subject action, camera movement (dolly, pan, push in, orbit,",
+      "  handheld, static), environmental motion (wind, dust, water, lighting",
+      "  shift), and pacing.",
+      "- Veo 3.0 is image-to-video, so assume the start frame is already fixed.",
+      "- Do NOT restate the entire scene - only what changes and moves.",
+      "- Include ambient audio cues when useful.",
+      "",
+      "NARRATION GUIDELINES:",
+      "- Write the narrator's actual spoken line for this scene.",
+      "- Target ~2.3 words per second of scene time. For an " + sceneSeconds +
+        "-second scene that is about " + narrWords + " words.",
+      "- Keep the voice consistent across scenes.",
+      "- The narration across all scenes must read like ONE coherent script -",
+      "  a beginning, middle, and end. Use the tone implied by the theme.",
+      "- Do not repeat the theme verbatim. Do not use stage directions in the",
+      "  narration field - only the words the narrator says.",
+      "",
+      "CAMERA DIRECTION GUIDELINES:",
+      "- One short line: shot type + movement + lens feel.",
+      "",
+      "OUTPUT FORMAT - RETURN ONLY A JSON OBJECT, NO MARKDOWN, NO BACKTICKS:",
+      "{",
+      '  "title": "Short catchy title for the video",',
+      '  "logline": "One-sentence summary of the story arc",',
+      '  "narratorPersona": "Describe the narrator voice",',
+      '  "visualStyle": "Global visual style every scene must share",',
+      '  "characterBible": [',
+      '    { "name": "Rex", "description": "Locked visual description" }',
+      "  ],",
+      '  "format": "' + format + '",',
+      '  "totalDurationSeconds": ' + totalSeconds + ",",
+      '  "scenes": [',
+      "    {",
+      '      "sceneNumber": 1,',
+      '      "duration": ' + sceneSeconds + ",",
+      '      "startImagePrompt": "...",',
+      '      "endImagePrompt": "...",',
+      '      "videoPrompt": "...",',
+      '      "narration": "...",',
+      '      "cameraDirection": "..."',
+      "    }",
+      "  ]",
+      "}",
+      "",
+      "RESPOND WITH ONLY THE JSON. No prose, no markdown fences."
+    ].join("\n");
+  }
+
+  function buildUserPrompt(theme, format) {
+    var isShort = format === "short";
+    return [
+      "THEME: " + theme,
+      "",
+      "Produce the full storyboard now.",
+      isShort
+        ? "Remember: exactly 2 scenes, 15 seconds each, for a YouTube Short."
+        : "Remember: exactly 38 scenes, 8 seconds each, for a 5-minute YouTube video.",
+      "Every scene's endImagePrompt must equal the next scene's startImagePrompt.",
+      "Lock character/visual details in the character bible and reuse them verbatim."
+    ].join("\n");
+  }
+
+  function extractJson(text) {
+    var s = (text || "").trim();
+    if (s.indexOf("```") === 0) {
+      s = s.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    }
+    try { return JSON.parse(s); } catch (e) {}
+    var m = s.match(/\{[\s\S]*\}/);
+    if (m) return JSON.parse(m[0]);
+    throw new Error("Could not parse JSON from model response.");
+  }
+
+  function enforceChain(sb) {
+    if (!sb || !Array.isArray(sb.scenes)) return sb;
+    var s = sb.scenes;
+    for (var i = 1; i < s.length; i++) {
+      if (s[i - 1] && s[i - 1].endImagePrompt && s[i]) {
+        s[i].startImagePrompt = s[i - 1].endImagePrompt;
+      }
+      if (s[i]) s[i].sceneNumber = i + 1;
+    }
+    if (s[0]) s[0].sceneNumber = 1;
+    return sb;
+  }
+
+  async function callClaude(apiKey, system, user, maxTokens) {
+    var res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: maxTokens,
+        system: system,
+        messages: [{ role: "user", content: user }]
+      })
+    });
+    if (!res.ok) {
+      var text = await res.text();
+      throw new Error("Claude API error " + res.status + ": " + text);
+    }
+    var data = await res.json();
+    return (data && data.content && data.content[0] && data.content[0].text) || "";
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function copyText(text, btn) {
+    try {
+      navigator.clipboard.writeText(text);
+      var old = btn.textContent;
+      btn.textContent = "Copied";
+      setTimeout(function () { btn.textContent = old; }, 1200);
+    } catch (e) {}
+  }
+
+  function renderBlock(label, value, accent) {
+    if (!value) return "";
+    var id = "b" + Math.random().toString(36).slice(2, 9);
+    return (
+      '<div class="block" style="border-left-color:' + accent + '">' +
+        '<div class="bhead">' +
+          '<div class="bl" style="color:' + accent + '">' + escapeHtml(label) + "</div>" +
+          '<button class="copybtn" data-copy-id="' + id + '">Copy</button>' +
+        "</div>" +
+        '<div class="bv" id="' + id + '">' + escapeHtml(value) + "</div>" +
+      "</div>"
+    );
+  }
+
+  function render(storyboard) {
+    var sb = storyboard;
+    var html = "";
+
+    html += '<div class="card summary">';
+    html += '<div class="spread">';
+    html += '<div style="flex:1;min-width:260px">';
+    html += '<div class="tag">' +
+      (sb.format === "short" ? "YouTube Short" : "YouTube Video") +
+      " &middot; " + (sb.totalDurationSeconds || 0) + "s &middot; " +
+      ((sb.scenes && sb.scenes.length) || 0) + " scenes</div>";
+    html += "<h2>" + escapeHtml(sb.title || "Untitled") + "</h2>";
+    html += '<p class="log">' + escapeHtml(sb.logline || "") + "</p>";
+    html += "</div>";
+    html += '<div class="row" style="gap:8px">';
+    html += '<button class="ghost" id="copy-all">Copy Full Script</button>';
+    html += '<button class="ghost" id="copy-narration">Copy Narration</button>';
+    html += "</div>";
+    html += "</div>";
+
+    html += '<div class="grid" style="margin-top:16px">';
+    if (sb.narratorPersona) {
+      html += '<div class="meta"><div class="ll2">Narrator</div><div class="vv">' +
+        escapeHtml(sb.narratorPersona) + "</div></div>";
+    }
+    if (sb.visualStyle) {
+      html += '<div class="meta"><div class="ll2">Visual Style</div><div class="vv">' +
+        escapeHtml(sb.visualStyle) + "</div></div>";
+    }
+    html += "</div>";
+
+    if (sb.characterBible && sb.characterBible.length) {
+      html += '<div style="margin-top:16px">';
+      html += '<div class="ll" style="margin-bottom:8px">Character Bible</div>';
+      for (var i = 0; i < sb.characterBible.length; i++) {
+        var c = sb.characterBible[i];
+        html += '<div class="char"><strong>' +
+          escapeHtml(c.name || "?") + "</strong> &mdash; " +
+          escapeHtml(c.description || "") + "</div>";
+      }
+      html += "</div>";
+    }
+    html += "</div>";
+
+    var scenes = sb.scenes || [];
+    for (var j = 0; j < scenes.length; j++) {
+      var s = scenes[j];
+      var n = s.sceneNumber || (j + 1);
+      html += '<div class="scene">';
+      html += '<div class="head">';
+      html += '<div class="row" style="gap:10px">';
+      html += '<div class="chip">SCENE ' + n + " / " + scenes.length + "</div>";
+      html += '<div class="dur">' + (s.duration || 0) + "s</div>";
+      html += "</div>";
+      html += '<div class="cam">' + escapeHtml(s.cameraDirection || "") + "</div>";
+      html += "</div>";
+
+      html += renderBlock("Start Frame - Image Prompt", s.startImagePrompt, "#60a5fa");
+      html += renderBlock("Veo 3.0 - Video Prompt", s.videoPrompt, "#a78bfa");
+      html += renderBlock("Narration", s.narration, "#f472b6");
+      html += renderBlock(
+        "End Frame - Image Prompt" +
+          (n < scenes.length ? " (= Scene " + (n + 1) + " start frame)" : ""),
+        s.endImagePrompt,
+        "#34d399"
+      );
+      html += "</div>";
+    }
+
+    outEl.innerHTML = html;
+
+    // Wire copy buttons
+    var copyBtns = outEl.querySelectorAll("[data-copy-id]");
+    for (var k = 0; k < copyBtns.length; k++) {
+      (function (btn) {
+        btn.addEventListener("click", function () {
+          var target = document.getElementById(btn.getAttribute("data-copy-id"));
+          if (target) copyText(target.textContent, btn);
+        });
+      })(copyBtns[k]);
+    }
+
+    var copyAllBtn = document.getElementById("copy-all");
+    if (copyAllBtn) {
+      copyAllBtn.addEventListener("click", function () {
+        copyText(buildFullScript(sb), copyAllBtn);
+      });
+    }
+    var copyNarrBtn = document.getElementById("copy-narration");
+    if (copyNarrBtn) {
+      copyNarrBtn.addEventListener("click", function () {
+        var lines = (sb.scenes || []).map(function (x) { return x.narration || ""; });
+        copyText(lines.join("\n\n"), copyNarrBtn);
+      });
+    }
+  }
+
+  function buildFullScript(sb) {
+    var lines = [];
+    lines.push("TITLE: " + (sb.title || ""));
+    lines.push("LOGLINE: " + (sb.logline || ""));
+    lines.push("NARRATOR: " + (sb.narratorPersona || ""));
+    lines.push("VISUAL STYLE: " + (sb.visualStyle || ""));
+    if (sb.characterBible && sb.characterBible.length) {
+      lines.push("");
+      lines.push("CHARACTER BIBLE:");
+      sb.characterBible.forEach(function (c) {
+        lines.push("- " + (c.name || "?") + ": " + (c.description || ""));
+      });
+    }
+    lines.push("");
+    lines.push(
+      "TOTAL DURATION: " + (sb.totalDurationSeconds || 0) + "s across " +
+        ((sb.scenes || []).length) + " scenes"
+    );
+    lines.push("");
+    (sb.scenes || []).forEach(function (s) {
+      lines.push("===== SCENE " + s.sceneNumber + " (" + s.duration + "s) =====");
+      lines.push("START IMAGE PROMPT:");
+      lines.push(s.startImagePrompt || "");
+      lines.push("");
+      lines.push("VEO 3.0 VIDEO PROMPT:");
+      lines.push(s.videoPrompt || "");
+      lines.push("");
+      lines.push("CAMERA: " + (s.cameraDirection || ""));
+      lines.push("");
+      lines.push("NARRATION: " + (s.narration || ""));
+      lines.push("");
+      lines.push("END IMAGE PROMPT (= next scene's start frame):");
+      lines.push(s.endImagePrompt || "");
+      lines.push("");
+    });
+    return lines.join("\n");
+  }
+
+  async function generate() {
+    clearError();
+    outEl.innerHTML = "";
+    var theme = themeEl.value.trim();
+    var apiKey = keyEl.value.trim();
+    if (!theme) return;
+    if (!apiKey) {
+      showError("Please add your Anthropic API key (expand the section below the button).");
+      return;
+    }
+    try { localStorage.setItem("anthropic_api_key", apiKey); } catch (e) {}
+
+    goBtn.disabled = true;
+    setLoading(
+      true,
+      format === "video"
+        ? "Storyboarding a full 5-minute video. This can take up to 60 seconds..."
+        : "Storyboarding your Short..."
+    );
+
+    try {
+      var sys = buildSystemPrompt(format);
+      var usr = buildUserPrompt(theme, format);
+      var maxTokens = format === "short" ? 4000 : 16000;
+      var text = await callClaude(apiKey, sys, usr, maxTokens);
+      var sb = extractJson(text);
+      sb = enforceChain(sb);
+      if (!sb.format) sb.format = format;
+      if (!sb.totalDurationSeconds) sb.totalDurationSeconds = format === "short" ? 30 : 300;
+      if (!Array.isArray(sb.scenes)) sb.scenes = [];
+      render(sb);
+    } catch (e) {
+      showError(e.message || "Generation failed");
+    } finally {
+      setLoading(false, "");
+      goBtn.disabled = !themeEl.value.trim();
+    }
+  }
+
+  goBtn.addEventListener("click", generate);
+  themeEl.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !goBtn.disabled) generate();
+  });
+})();
+</script>
+</body>
+</html>
