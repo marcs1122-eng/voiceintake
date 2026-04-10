@@ -275,6 +275,88 @@
     line-height: 1.5;
   }
   a { color: #93c5fd; }
+  .kit-section {
+    margin-top: 28px;
+  }
+  .kit-title {
+    font-size: 22px;
+    font-weight: 800;
+    background: linear-gradient(90deg, #f59e0b 0%, #ef4444 50%, #ec4899 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    color: transparent;
+    margin: 0 0 10px;
+  }
+  .kit-sub {
+    color: var(--text-dim);
+    font-size: 14px;
+    margin: 0 0 14px;
+  }
+  .platform {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .platform h3 {
+    margin: 0 0 4px;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .platform .plat-badge {
+    font-size: 11px;
+    font-weight: 800;
+    padding: 3px 8px;
+    border-radius: 999px;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+  }
+  .badge-yt { background: #7f1d1d; color: #fecaca; }
+  .badge-tt { background: #083344; color: #a5f3fc; }
+  .badge-ig { background: #4a044e; color: #f5d0fe; }
+  .badge-viral { background: #14532d; color: #bbf7d0; }
+  .platform p.plat-desc {
+    color: var(--text-mute);
+    font-size: 12px;
+    margin: 0 0 12px;
+  }
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .tag {
+    background: #0b1120;
+    border: 1px solid var(--border-2);
+    color: #cbd5e1;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+  }
+  ol.chapters {
+    margin: 0;
+    padding-left: 20px;
+    color: #cbd5e1;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+  ol.chapters li { margin: 2px 0; }
+  .chapter-time {
+    color: #a78bfa;
+    font-weight: 700;
+    margin-right: 6px;
+  }
+  ul.bullets {
+    margin: 0;
+    padding-left: 20px;
+    color: #cbd5e1;
+    font-size: 14px;
+    line-height: 1.6;
+  }
 </style>
 </head>
 <body>
@@ -283,10 +365,10 @@
   <header style="margin-bottom:22px">
     <h1>AI Image + Video Prompt Generator</h1>
     <p>
-      Type a theme. Get a full storyboard with image prompts, Veo 3.0 video
-      prompts, and narration for a YouTube Short or a 5-minute video. Each
-      scene's end frame is the next scene's start frame, so your clips chain
-      into one seamless video.
+      Type a theme. Get a full storyboard (image prompts + Veo 3.0 video
+      prompts + narration) AND a complete publishing kit for YouTube,
+      TikTok, and Instagram Reels — titles, descriptions, tags, hashtags,
+      thumbnail prompts, hooks, and viral strategy.
     </p>
   </header>
 
@@ -494,6 +576,105 @@
     ].join("\n");
   }
 
+  function buildKitSystemPrompt(format) {
+    var isShort = format === "short";
+    var longOrShort = isShort
+      ? "a YouTube Short / TikTok / Instagram Reel (~30 seconds vertical)"
+      : "a 5-minute long-form YouTube video (with optional repurposed Shorts/Reels/TikTok clips)";
+    return [
+      "You are an elite YouTube + TikTok + Instagram Reels growth strategist.",
+      "Given a video storyboard, produce a COMPLETE publishing kit for all",
+      "three platforms so the creator can paste-and-post to maximize virality.",
+      "",
+      "TARGET FORMAT: " + longOrShort + ".",
+      "",
+      "GUIDING PRINCIPLES:",
+      "- Titles must be clickable but NOT cheap clickbait. Curiosity + payoff.",
+      "- Hooks must grab attention in the first 1-3 seconds (pattern interrupt,",
+      "  bold claim, question, visual shock).",
+      "- Descriptions should have: hook line, 2-3 sentence summary, CTA to",
+      "  subscribe/like, then hashtags at the bottom.",
+      "- Tags should be a mix of broad (high volume) and niche (low competition).",
+      "- Hashtags differ per platform. TikTok loves #fyp #foryou #viral.",
+      "  Instagram Reels loves niche community tags + a few broad. YouTube",
+      "  Shorts: #shorts + 2-3 topical hashtags in the title.",
+      "- Thumbnails/covers are the #1 driver of CTR. Prompt should specify:",
+      "  bold expressive face, high-contrast colors, minimal text, negative",
+      "  space for overlay text, and rule-of-thirds composition.",
+      "- Thumbnail/cover text should be MAX 3-5 words, bold, punchy.",
+      "- Trending sound suggestion should be a TYPE of sound (e.g. 'upbeat",
+      "  orchestral drop', 'viral meme audio', 'lo-fi piano') since specific",
+      "  trending tracks change daily.",
+      "",
+      "OUTPUT FORMAT - RETURN ONLY A JSON OBJECT, NO MARKDOWN, NO BACKTICKS:",
+      "{",
+      '  "hook": "First 1-3 seconds spoken or on-screen hook (one line)",',
+      '  "youtube": {',
+      '    "title": "Max 100 chars, SEO + curiosity",',
+      '    "description": "Full multi-paragraph description. Hook line first, then summary, then CTA, then hashtags at the bottom. Max 5000 chars.",',
+      '    "tags": ["tag1","tag2", "..."],',
+      '    "category": "Entertainment | Comedy | Education | Film & Animation | Howto & Style | People & Blogs | Pets & Animals | etc",',
+      '    "thumbnailPrompt": "Detailed image-generation prompt for a high-CTR thumbnail",',
+      '    "thumbnailText": "MAX 3-5 bold words to overlay on the thumbnail",',
+      '    "chapters": [ { "time": "0:00", "title": "Hook" } ],',
+      '    "pinnedComment": "First comment to pin for engagement",',
+      '    "endScreenCTA": "Closing CTA script"',
+      "  },",
+      '  "tiktok": {',
+      '    "caption": "Punchy caption with hook + hashtags, max 2200 chars",',
+      '    "hashtags": ["#fyp","#viral","..."],',
+      '    "coverPrompt": "Image prompt for TikTok cover frame",',
+      '    "coverText": "MAX 3-5 words for cover overlay",',
+      '    "soundSuggestion": "Type of trending sound to pair with",',
+      '    "bestPostTime": "e.g. 7-10pm EST weekdays"',
+      "  },",
+      '  "instagram": {',
+      '    "reelsCaption": "First line = hook. Then 1-2 sentence body. Then CTA. Then hashtags. Max 2200 chars.",',
+      '    "hashtags": ["#reels","..."],',
+      '    "coverPrompt": "Image prompt for IG reel cover",',
+      '    "coverText": "MAX 3-5 words for cover overlay",',
+      '    "altText": "Accessibility alt text describing the cover image",',
+      '    "bestPostTime": "e.g. 11am-1pm EST weekdays"',
+      "  },",
+      '  "viralStrategy": {',
+      '    "retentionTips": ["Tip 1","Tip 2","Tip 3"],',
+      '    "trendingAngles": ["Angle 1","Angle 2"],',
+      '    "crossPromo": "How to repurpose this across platforms"',
+      "  }",
+      "}",
+      "",
+      "TAG/HASHTAG RULES:",
+      "- youtube.tags: 20-30 items, total under 500 chars combined.",
+      "- tiktok.hashtags: 8-12 items, mix broad + niche. Include the # prefix.",
+      "- instagram.hashtags: 15-25 items. Include the # prefix.",
+      "",
+      "RESPOND WITH ONLY THE JSON. No prose, no markdown fences."
+    ].join("\n");
+  }
+
+  function buildKitUserPrompt(theme, format, storyboard) {
+    var summary = {
+      title: storyboard.title,
+      logline: storyboard.logline,
+      narratorPersona: storyboard.narratorPersona,
+      visualStyle: storyboard.visualStyle,
+      characterBible: storyboard.characterBible,
+      totalDurationSeconds: storyboard.totalDurationSeconds,
+      narration: (storyboard.scenes || [])
+        .map(function (s) { return s.narration || ""; })
+        .join(" ")
+    };
+    return [
+      "THEME: " + theme,
+      "FORMAT: " + format,
+      "",
+      "STORYBOARD SUMMARY (JSON):",
+      JSON.stringify(summary),
+      "",
+      "Produce the complete publishing kit now. Return JSON only."
+    ].join("\n");
+  }
+
   function extractJson(text) {
     var s = (text || "").trim();
     if (s.indexOf("```") === 0) {
@@ -671,6 +852,278 @@
     }
   }
 
+  function renderKit(kit, theme, format) {
+    if (!kit) return;
+    var yt = kit.youtube || {};
+    var tt = kit.tiktok || {};
+    var ig = kit.instagram || {};
+    var vs = kit.viralStrategy || {};
+
+    var html = '<div class="kit-section" id="kit-section">';
+    html += '<h2 class="kit-title">Publishing Kit</h2>';
+    html += '<p class="kit-sub">Paste-and-post content for YouTube, TikTok, and Instagram Reels.</p>';
+
+    if (kit.hook) {
+      html += '<div class="platform">';
+      html += '<h3><span class="plat-badge badge-viral">HOOK</span> First 1-3 Seconds</h3>';
+      html += '<p class="plat-desc">This must grab attention immediately. Say/show it first.</p>';
+      html += renderBlock("Opening Hook", kit.hook, "#f59e0b");
+      html += "</div>";
+    }
+
+    // YouTube
+    html += '<div class="platform">';
+    html += '<h3><span class="plat-badge badge-yt">YOUTUBE</span> ' +
+      (format === "short" ? "Shorts" : "Long-form") + "</h3>";
+    html += '<p class="plat-desc">Title + description + tags + thumbnail prompt.</p>';
+    if (yt.title) html += renderBlock("Title (max 100 chars)", yt.title, "#f87171");
+    if (yt.description) html += renderBlock("Description", yt.description, "#f87171");
+
+    if (yt.tags && yt.tags.length) {
+      html += '<div class="block" style="border-left-color:#f87171">';
+      html += '<div class="bhead"><div class="bl" style="color:#f87171">Tags</div>' +
+        '<button class="copybtn" id="yt-tags-copy">Copy</button></div>';
+      html += '<div class="tags" id="yt-tags-list">';
+      for (var i = 0; i < yt.tags.length; i++) {
+        html += '<span class="tag">' + escapeHtml(yt.tags[i]) + "</span>";
+      }
+      html += "</div></div>";
+    }
+
+    if (yt.category) html += renderBlock("Category", yt.category, "#f87171");
+    if (yt.thumbnailPrompt) html += renderBlock("Thumbnail Image Prompt", yt.thumbnailPrompt, "#60a5fa");
+    if (yt.thumbnailText) html += renderBlock("Thumbnail Text Overlay (max 3-5 words)", yt.thumbnailText, "#60a5fa");
+
+    if (yt.chapters && yt.chapters.length) {
+      html += '<div class="block" style="border-left-color:#f87171">';
+      html += '<div class="bhead"><div class="bl" style="color:#f87171">Chapters</div></div>';
+      html += '<ol class="chapters">';
+      for (var c = 0; c < yt.chapters.length; c++) {
+        var ch = yt.chapters[c];
+        html += '<li><span class="chapter-time">' + escapeHtml(ch.time || "") +
+          "</span>" + escapeHtml(ch.title || "") + "</li>";
+      }
+      html += "</ol></div>";
+    }
+
+    if (yt.pinnedComment) html += renderBlock("Pinned Comment", yt.pinnedComment, "#f87171");
+    if (yt.endScreenCTA) html += renderBlock("End Screen CTA", yt.endScreenCTA, "#f87171");
+    html += "</div>";
+
+    // TikTok
+    html += '<div class="platform">';
+    html += '<h3><span class="plat-badge badge-tt">TIKTOK</span></h3>';
+    html += '<p class="plat-desc">Caption, hashtags, cover, and sound suggestion.</p>';
+    if (tt.caption) html += renderBlock("Caption", tt.caption, "#22d3ee");
+
+    if (tt.hashtags && tt.hashtags.length) {
+      html += '<div class="block" style="border-left-color:#22d3ee">';
+      html += '<div class="bhead"><div class="bl" style="color:#22d3ee">Hashtags</div>' +
+        '<button class="copybtn" id="tt-tags-copy">Copy</button></div>';
+      html += '<div class="tags" id="tt-tags-list">';
+      for (var j = 0; j < tt.hashtags.length; j++) {
+        html += '<span class="tag">' + escapeHtml(tt.hashtags[j]) + "</span>";
+      }
+      html += "</div></div>";
+    }
+
+    if (tt.coverPrompt) html += renderBlock("Cover Image Prompt", tt.coverPrompt, "#60a5fa");
+    if (tt.coverText) html += renderBlock("Cover Text Overlay", tt.coverText, "#60a5fa");
+    if (tt.soundSuggestion) html += renderBlock("Sound Suggestion", tt.soundSuggestion, "#22d3ee");
+    if (tt.bestPostTime) html += renderBlock("Best Post Time", tt.bestPostTime, "#22d3ee");
+    html += "</div>";
+
+    // Instagram
+    html += '<div class="platform">';
+    html += '<h3><span class="plat-badge badge-ig">INSTAGRAM REELS</span></h3>';
+    html += '<p class="plat-desc">Reel caption, hashtags, cover, and alt text.</p>';
+    if (ig.reelsCaption) html += renderBlock("Reels Caption", ig.reelsCaption, "#e879f9");
+
+    if (ig.hashtags && ig.hashtags.length) {
+      html += '<div class="block" style="border-left-color:#e879f9">';
+      html += '<div class="bhead"><div class="bl" style="color:#e879f9">Hashtags</div>' +
+        '<button class="copybtn" id="ig-tags-copy">Copy</button></div>';
+      html += '<div class="tags" id="ig-tags-list">';
+      for (var k = 0; k < ig.hashtags.length; k++) {
+        html += '<span class="tag">' + escapeHtml(ig.hashtags[k]) + "</span>";
+      }
+      html += "</div></div>";
+    }
+
+    if (ig.coverPrompt) html += renderBlock("Cover Image Prompt", ig.coverPrompt, "#60a5fa");
+    if (ig.coverText) html += renderBlock("Cover Text Overlay", ig.coverText, "#60a5fa");
+    if (ig.altText) html += renderBlock("Alt Text (accessibility)", ig.altText, "#e879f9");
+    if (ig.bestPostTime) html += renderBlock("Best Post Time", ig.bestPostTime, "#e879f9");
+    html += "</div>";
+
+    // Viral strategy
+    if (vs && (vs.retentionTips || vs.trendingAngles || vs.crossPromo)) {
+      html += '<div class="platform">';
+      html += '<h3><span class="plat-badge badge-viral">VIRAL STRATEGY</span></h3>';
+      html += '<p class="plat-desc">Retention, trending angles, and cross-platform repurposing.</p>';
+
+      if (vs.retentionTips && vs.retentionTips.length) {
+        html += '<div class="block" style="border-left-color:#22c55e">';
+        html += '<div class="bhead"><div class="bl" style="color:#22c55e">Retention Tips</div></div>';
+        html += '<ul class="bullets">';
+        for (var r = 0; r < vs.retentionTips.length; r++) {
+          html += "<li>" + escapeHtml(vs.retentionTips[r]) + "</li>";
+        }
+        html += "</ul></div>";
+      }
+      if (vs.trendingAngles && vs.trendingAngles.length) {
+        html += '<div class="block" style="border-left-color:#22c55e">';
+        html += '<div class="bhead"><div class="bl" style="color:#22c55e">Trending Angles</div></div>';
+        html += '<ul class="bullets">';
+        for (var t = 0; t < vs.trendingAngles.length; t++) {
+          html += "<li>" + escapeHtml(vs.trendingAngles[t]) + "</li>";
+        }
+        html += "</ul></div>";
+      }
+      if (vs.crossPromo) {
+        html += renderBlock("Cross-Platform Repurposing", vs.crossPromo, "#22c55e");
+      }
+      html += "</div>";
+    }
+
+    // Copy entire kit button
+    html += '<div style="text-align:center;margin-top:10px">';
+    html += '<button class="ghost" id="copy-kit">Copy Entire Publishing Kit</button>';
+    html += "</div>";
+
+    html += "</div>"; // kit-section
+
+    // Append to output
+    var kitContainer = document.createElement("div");
+    kitContainer.innerHTML = html;
+    outEl.appendChild(kitContainer);
+
+    // Wire copy buttons for each block
+    var copyBtns = kitContainer.querySelectorAll("[data-copy-id]");
+    for (var kb = 0; kb < copyBtns.length; kb++) {
+      (function (btn) {
+        btn.addEventListener("click", function () {
+          var target = document.getElementById(btn.getAttribute("data-copy-id"));
+          if (target) copyText(target.textContent, btn);
+        });
+      })(copyBtns[kb]);
+    }
+
+    // Tag list copy buttons (space-separated for hashtags, comma for YT tags)
+    wireTagCopy("yt-tags-copy", "yt-tags-list", ", ");
+    wireTagCopy("tt-tags-copy", "tt-tags-list", " ");
+    wireTagCopy("ig-tags-copy", "ig-tags-list", " ");
+
+    var copyKitBtn = document.getElementById("copy-kit");
+    if (copyKitBtn) {
+      copyKitBtn.addEventListener("click", function () {
+        copyText(buildKitText(kit, theme, format), copyKitBtn);
+      });
+    }
+  }
+
+  function wireTagCopy(btnId, listId, sep) {
+    var btn = document.getElementById(btnId);
+    var list = document.getElementById(listId);
+    if (!btn || !list) return;
+    btn.addEventListener("click", function () {
+      var items = list.querySelectorAll(".tag");
+      var arr = [];
+      for (var i = 0; i < items.length; i++) arr.push(items[i].textContent);
+      copyText(arr.join(sep), btn);
+    });
+  }
+
+  function buildKitText(kit, theme, format) {
+    var yt = kit.youtube || {};
+    var tt = kit.tiktok || {};
+    var ig = kit.instagram || {};
+    var vs = kit.viralStrategy || {};
+    var lines = [];
+    lines.push("PUBLISHING KIT");
+    lines.push("THEME: " + theme);
+    lines.push("FORMAT: " + format);
+    if (kit.hook) {
+      lines.push("");
+      lines.push("HOOK (first 1-3 seconds):");
+      lines.push(kit.hook);
+    }
+    lines.push("");
+    lines.push("===== YOUTUBE =====");
+    if (yt.title) lines.push("TITLE: " + yt.title);
+    if (yt.category) lines.push("CATEGORY: " + yt.category);
+    if (yt.description) {
+      lines.push("");
+      lines.push("DESCRIPTION:");
+      lines.push(yt.description);
+    }
+    if (yt.tags && yt.tags.length) {
+      lines.push("");
+      lines.push("TAGS: " + yt.tags.join(", "));
+    }
+    if (yt.thumbnailPrompt) {
+      lines.push("");
+      lines.push("THUMBNAIL IMAGE PROMPT:");
+      lines.push(yt.thumbnailPrompt);
+    }
+    if (yt.thumbnailText) lines.push("THUMBNAIL TEXT OVERLAY: " + yt.thumbnailText);
+    if (yt.chapters && yt.chapters.length) {
+      lines.push("");
+      lines.push("CHAPTERS:");
+      yt.chapters.forEach(function (c) {
+        lines.push((c.time || "") + " " + (c.title || ""));
+      });
+    }
+    if (yt.pinnedComment) {
+      lines.push("");
+      lines.push("PINNED COMMENT: " + yt.pinnedComment);
+    }
+    if (yt.endScreenCTA) lines.push("END SCREEN CTA: " + yt.endScreenCTA);
+
+    lines.push("");
+    lines.push("===== TIKTOK =====");
+    if (tt.caption) lines.push("CAPTION: " + tt.caption);
+    if (tt.hashtags && tt.hashtags.length) lines.push("HASHTAGS: " + tt.hashtags.join(" "));
+    if (tt.coverPrompt) {
+      lines.push("");
+      lines.push("COVER IMAGE PROMPT:");
+      lines.push(tt.coverPrompt);
+    }
+    if (tt.coverText) lines.push("COVER TEXT OVERLAY: " + tt.coverText);
+    if (tt.soundSuggestion) lines.push("SOUND: " + tt.soundSuggestion);
+    if (tt.bestPostTime) lines.push("BEST POST TIME: " + tt.bestPostTime);
+
+    lines.push("");
+    lines.push("===== INSTAGRAM REELS =====");
+    if (ig.reelsCaption) lines.push("CAPTION: " + ig.reelsCaption);
+    if (ig.hashtags && ig.hashtags.length) lines.push("HASHTAGS: " + ig.hashtags.join(" "));
+    if (ig.coverPrompt) {
+      lines.push("");
+      lines.push("COVER IMAGE PROMPT:");
+      lines.push(ig.coverPrompt);
+    }
+    if (ig.coverText) lines.push("COVER TEXT OVERLAY: " + ig.coverText);
+    if (ig.altText) lines.push("ALT TEXT: " + ig.altText);
+    if (ig.bestPostTime) lines.push("BEST POST TIME: " + ig.bestPostTime);
+
+    if (vs && (vs.retentionTips || vs.trendingAngles || vs.crossPromo)) {
+      lines.push("");
+      lines.push("===== VIRAL STRATEGY =====");
+      if (vs.retentionTips && vs.retentionTips.length) {
+        lines.push("RETENTION TIPS:");
+        vs.retentionTips.forEach(function (x) { lines.push("- " + x); });
+      }
+      if (vs.trendingAngles && vs.trendingAngles.length) {
+        lines.push("TRENDING ANGLES:");
+        vs.trendingAngles.forEach(function (x) { lines.push("- " + x); });
+      }
+      if (vs.crossPromo) {
+        lines.push("CROSS-PROMO: " + vs.crossPromo);
+      }
+    }
+    return lines.join("\n");
+  }
+
   function buildFullScript(sb) {
     var lines = [];
     lines.push("TITLE: " + (sb.title || ""));
@@ -740,6 +1193,24 @@
       if (!sb.totalDurationSeconds) sb.totalDurationSeconds = format === "short" ? 30 : 300;
       if (!Array.isArray(sb.scenes)) sb.scenes = [];
       render(sb);
+
+      // Second call: generate the publishing kit
+      setLoading(true, "Generating publishing kit for YouTube, TikTok, and Instagram Reels...");
+      try {
+        var kitSys = buildKitSystemPrompt(format);
+        var kitUsr = buildKitUserPrompt(theme, format, sb);
+        var kitText = await callClaude(apiKey, kitSys, kitUsr, 4000);
+        var kit = extractJson(kitText);
+        renderKit(kit, theme, format);
+      } catch (ke) {
+        console.error(ke);
+        var warn = document.createElement("div");
+        warn.className = "err";
+        warn.style.marginTop = "18px";
+        warn.textContent = "Storyboard succeeded but publishing kit failed: " +
+          (ke.message || "unknown error");
+        outEl.appendChild(warn);
+      }
     } catch (e) {
       showError(e.message || "Generation failed");
     } finally {
