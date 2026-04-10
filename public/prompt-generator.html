@@ -1,0 +1,1307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI Image + Video Prompt Generator</title>
+<style>
+  :root {
+    --bg1: #0b1120;
+    --bg2: #1e1b4b;
+    --panel: #111827;
+    --panel-2: #0b1120;
+    --border: #1f2937;
+    --border-2: #334155;
+    --text: #e2e8f0;
+    --text-dim: #94a3b8;
+    --text-mute: #64748b;
+    --accent-a: #ec4899;
+    --accent-b: #8b5cf6;
+    --accent-c: #3b82f6;
+    --accent-img: #60a5fa;
+    --accent-video: #a78bfa;
+    --accent-narr: #f472b6;
+    --accent-end: #34d399;
+    --danger-bg: #7f1d1d;
+    --danger-border: #dc2626;
+    --danger-text: #fecaca;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: linear-gradient(180deg, var(--bg1) 0%, var(--bg2) 100%);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      "Helvetica Neue", Arial, sans-serif;
+    min-height: 100vh;
+  }
+  main { padding: 40px 20px; }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 {
+    margin: 0;
+    font-size: 36px;
+    font-weight: 800;
+    background: linear-gradient(90deg, #f472b6 0%, #a78bfa 50%, #60a5fa 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    color: transparent;
+  }
+  header p {
+    margin: 8px 0 0;
+    color: var(--text-dim);
+    font-size: 15px;
+    line-height: 1.55;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    margin-bottom: 16px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+  }
+  label.ll {
+    display: block;
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+    font-weight: 700;
+  }
+  input[type="text"],
+  input[type="password"] {
+    width: 100%;
+    background: var(--panel-2);
+    border: 1px solid var(--border-2);
+    border-radius: 10px;
+    padding: 13px 15px;
+    color: #f1f5f9;
+    font-size: 16px;
+    outline: none;
+    font-family: inherit;
+  }
+  input:focus { border-color: var(--accent-b); }
+  .row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .grow { flex: 1; min-width: 0; }
+  .pill {
+    background: var(--panel-2);
+    border: 1px solid var(--border-2);
+    border-radius: 10px;
+    padding: 10px 14px;
+    cursor: pointer;
+    text-align: left;
+    color: var(--text);
+    font-family: inherit;
+  }
+  .pill.active {
+    background: rgba(139, 92, 246, 0.18);
+    border-color: var(--accent-b);
+  }
+  .pill .t { font-size: 14px; font-weight: 700; }
+  .pill .s { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+  button.primary {
+    background: linear-gradient(90deg, var(--accent-a), var(--accent-b), var(--accent-c));
+    color: white;
+    border: none;
+    border-radius: 10px;
+    padding: 12px 26px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    letter-spacing: 0.3px;
+    font-family: inherit;
+  }
+  button.primary:disabled {
+    background: #475569;
+    cursor: not-allowed;
+  }
+  button.ghost {
+    background: #1f2937;
+    border: 1px solid var(--border-2);
+    border-radius: 8px;
+    padding: 8px 14px;
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .err {
+    margin-top: 18px;
+    padding: 14px 16px;
+    background: var(--danger-bg);
+    border: 1px solid var(--danger-border);
+    border-radius: 10px;
+    color: var(--danger-text);
+  }
+  .muted {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 14px;
+    padding: 18px 0;
+  }
+  .scene {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px;
+    margin-bottom: 14px;
+  }
+  .scene .head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .chip {
+    background: linear-gradient(90deg, var(--accent-a), var(--accent-b));
+    color: white;
+    font-weight: 800;
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    letter-spacing: 0.4px;
+  }
+  .dur { font-size: 13px; color: var(--text-dim); }
+  .cam { font-size: 12px; color: var(--text-mute); }
+  .block {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent-b);
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+  }
+  .block .bhead {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+  .block .bl {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 700;
+  }
+  .block .bv {
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+  }
+  .copybtn {
+    background: transparent;
+    border: 1px solid var(--border-2);
+    color: #cbd5e1;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+  }
+  .meta {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+  }
+  .meta .ll2 {
+    font-size: 11px;
+    color: var(--text-mute);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .meta .vv {
+    margin-top: 4px;
+    font-size: 14px;
+    color: #cbd5e1;
+  }
+  .char {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 14px;
+    color: #cbd5e1;
+    margin-bottom: 8px;
+  }
+  .char strong { color: #f1f5f9; }
+  .summary h2 { margin: 6px 0 4px; font-size: 24px; }
+  .summary .tag {
+    font-size: 12px;
+    color: var(--text-mute);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  .summary .log {
+    margin: 0;
+    color: #cbd5e1;
+    font-size: 15px;
+    line-height: 1.5;
+  }
+  .spread {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  details.keywrap { margin-top: 14px; }
+  details.keywrap summary {
+    cursor: pointer;
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+  .hint {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--text-mute);
+    line-height: 1.5;
+  }
+  a { color: #93c5fd; }
+  .kit-section {
+    margin-top: 28px;
+  }
+  .kit-title {
+    font-size: 22px;
+    font-weight: 800;
+    background: linear-gradient(90deg, #f59e0b 0%, #ef4444 50%, #ec4899 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    color: transparent;
+    margin: 0 0 10px;
+  }
+  .kit-sub {
+    color: var(--text-dim);
+    font-size: 14px;
+    margin: 0 0 14px;
+  }
+  .platform {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    margin-bottom: 16px;
+  }
+  .platform h3 {
+    margin: 0 0 4px;
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .platform .plat-badge {
+    font-size: 11px;
+    font-weight: 800;
+    padding: 3px 8px;
+    border-radius: 999px;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+  }
+  .badge-yt { background: #7f1d1d; color: #fecaca; }
+  .badge-tt { background: #083344; color: #a5f3fc; }
+  .badge-ig { background: #4a044e; color: #f5d0fe; }
+  .badge-viral { background: #14532d; color: #bbf7d0; }
+  .platform p.plat-desc {
+    color: var(--text-mute);
+    font-size: 12px;
+    margin: 0 0 12px;
+  }
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .tag {
+    background: #0b1120;
+    border: 1px solid var(--border-2);
+    color: #cbd5e1;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+  }
+  ol.chapters {
+    margin: 0;
+    padding-left: 20px;
+    color: #cbd5e1;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+  ol.chapters li { margin: 2px 0; }
+  .chapter-time {
+    color: #a78bfa;
+    font-weight: 700;
+    margin-right: 6px;
+  }
+  ul.bullets {
+    margin: 0;
+    padding-left: 20px;
+    color: #cbd5e1;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+<main>
+<div class="wrap">
+  <header style="margin-bottom:22px">
+    <h1>AI Image + Video Prompt Generator</h1>
+    <p>
+      Type a theme. Get a full storyboard tuned for <strong>Seedance 2.0</strong>
+      (Higgsfield) — one opening image prompt + one Seedance prompt with
+      embedded voiceover per scene — plus a complete publishing kit for
+      YouTube, TikTok, and Instagram Reels.
+    </p>
+  </header>
+
+  <div class="card">
+    <label class="ll" for="theme">Theme</label>
+    <input
+      id="theme"
+      type="text"
+      placeholder="e.g. Dogs speaking to other dog, humorous"
+      autofocus
+    />
+
+    <div class="row" style="margin-top:14px">
+      <button type="button" class="pill active" data-format="short" id="pill-short">
+        <div class="t">YouTube Short</div>
+        <div class="s">2 clips &middot; 15s each &middot; 9:16</div>
+      </button>
+      <button type="button" class="pill" data-format="video" id="pill-video">
+        <div class="t">YouTube Video</div>
+        <div class="s">20 clips &middot; 15s each &middot; 16:9</div>
+      </button>
+      <div class="grow"></div>
+      <button id="go" class="primary" disabled>Generate Storyboard</button>
+    </div>
+
+    <details class="keywrap">
+      <summary>Anthropic API key (stored only in your browser)</summary>
+      <div style="margin-top:10px">
+        <input
+          id="apikey"
+          type="password"
+          placeholder="sk-ant-api03-..."
+          autocomplete="off"
+        />
+        <div class="hint">
+          This HTML file calls the Claude API directly from your browser. Your
+          key is saved in <code>localStorage</code> on this device only. Get a
+          key from console.anthropic.com.
+        </div>
+      </div>
+    </details>
+  </div>
+
+  <div id="error" class="err" style="display:none"></div>
+  <div id="loading" class="muted" style="display:none"></div>
+  <div id="output"></div>
+</div>
+</main>
+
+<script>
+(function () {
+  var themeEl = document.getElementById("theme");
+  var keyEl = document.getElementById("apikey");
+  var goBtn = document.getElementById("go");
+  var pillShort = document.getElementById("pill-short");
+  var pillVideo = document.getElementById("pill-video");
+  var errEl = document.getElementById("error");
+  var loadEl = document.getElementById("loading");
+  var outEl = document.getElementById("output");
+
+  var format = "short";
+
+  // Restore saved key
+  try {
+    var savedKey = localStorage.getItem("anthropic_api_key") || "";
+    if (savedKey) keyEl.value = savedKey;
+  } catch (e) {}
+
+  keyEl.addEventListener("change", function () {
+    try {
+      localStorage.setItem("anthropic_api_key", keyEl.value.trim());
+    } catch (e) {}
+  });
+
+  function updateGoState() {
+    goBtn.disabled = !themeEl.value.trim();
+  }
+  themeEl.addEventListener("input", updateGoState);
+  updateGoState();
+
+  function setFormat(f) {
+    format = f;
+    if (f === "short") {
+      pillShort.classList.add("active");
+      pillVideo.classList.remove("active");
+    } else {
+      pillVideo.classList.add("active");
+      pillShort.classList.remove("active");
+    }
+  }
+  pillShort.addEventListener("click", function () { setFormat("short"); });
+  pillVideo.addEventListener("click", function () { setFormat("video"); });
+
+  function showError(msg) {
+    errEl.textContent = msg;
+    errEl.style.display = "block";
+  }
+  function clearError() {
+    errEl.style.display = "none";
+    errEl.textContent = "";
+  }
+  function setLoading(on, msg) {
+    loadEl.style.display = on ? "block" : "none";
+    loadEl.textContent = msg || "";
+  }
+
+  function buildSystemPrompt(format) {
+    var isShort = format === "short";
+    var sceneCount = isShort ? 2 : 20;
+    var sceneSeconds = 15; // Seedance 2.0 max clip = 15s (Higgsfield paid)
+    var totalSeconds = isShort ? 30 : 300;
+    var totalLabel = isShort ? "30-second YouTube Short" : "5-minute YouTube video";
+    var aspect = isShort ? "9:16 vertical" : "16:9 horizontal";
+    var narrWords = Math.round(sceneSeconds * 2.3);
+
+    return [
+      "You are a world-class AI video director and prompt engineer for",
+      "Seedance 2.0 (ByteDance) running on Higgsfield.",
+      "",
+      "ABOUT SEEDANCE 2.0 (CRITICAL FOR PROMPTING):",
+      "- Image-to-video with NATIVE SYNCHRONIZED AUDIO in a single pass.",
+      "- It generates video + voiceover + dialogue (with lip sync) + SFX +",
+      "  ambient + music all from ONE text prompt plus reference files.",
+      "- Max clip length 15 seconds, 720p on Higgsfield paid tier.",
+      "- Prompts can be up to 5,000 characters.",
+      "- Recommended structure inside each prompt:",
+      "  Subject -> Action -> Camera -> Environment -> Lighting -> Audio / Mood",
+      "- Supports timeline markers for multi-beat scenes: [0-3s] ... [3-6s] ...",
+      "- Supports up to 12 reference files (images, video, audio) via @-tags:",
+      "  @image1, @image2, @video1, @audio1. Use @image1 to lock a character",
+      "  appearance and @audio1 to lock the narrator voice across EVERY scene.",
+      "",
+      "TARGET FORMAT: " + totalLabel + ", " + aspect + ".",
+      "TOTAL SCENES: exactly " + sceneCount + ".",
+      "EACH SCENE DURATION: " + sceneSeconds + " seconds.",
+      "TOTAL DURATION: " + totalSeconds + " seconds.",
+      "",
+      "OUR WORKFLOW (what the creator will do):",
+      "1. Generate the opening keyframe image for each scene using startImagePrompt.",
+      "2. Upload 1-4 reference assets to Higgsfield ONCE: a locked character",
+      "   reference image (@image1) and a locked narrator voice sample (@audio1).",
+      "   You define what these references are in referenceAssets below.",
+      "3. For each scene, upload the opening keyframe as the starting image and",
+      "   paste seedancePrompt into the Seedance 2.0 prompt box.",
+      "4. Seedance 2.0 produces a " + sceneSeconds + "s clip with video AND audio in one pass.",
+      "",
+      "REFERENCE ASSETS RULES:",
+      "- Always define @image1 as the primary character reference (visual lock).",
+      "- Always define @audio1 as the narrator voice reference (voice lock).",
+      "- If the theme has a second recurring character, define @image2.",
+      "- If there is a signature sound/music bed, define @audio2.",
+      "- Max 4 references total. Keep it simple.",
+      "- For each reference, describe what the creator should generate/record,",
+      "  so they know exactly what file to upload to that @slot.",
+      "",
+      "IMAGE PROMPT GUIDELINES (startImagePrompt):",
+      "- This is the OPENING KEYFRAME only. 40-80 word paragraph.",
+      "- Include: subject, pose, setting, composition, lens, lighting, mood,",
+      "  color palette, rendering style.",
+      "- Repeat the locked character descriptors VERBATIM from the character",
+      "  bible every time that character appears.",
+      "- Use " + aspect + " framing.",
+      "- Do NOT reference other scenes by number.",
+      "",
+      "SEEDANCE 2.0 PROMPT GUIDELINES (seedancePrompt) - THIS IS THE CORE:",
+      "Each seedancePrompt is ~200-400 words and MUST follow this template:",
+      "",
+      "```",
+      "[Subject with locked character descriptors] [opening pose / action]. Reference @image1 for character appearance.",
+      "",
+      "[0-4s] [Beat 1: specific action, micro-expression, subtle movement, camera move]",
+      "[4-10s] [Beat 2: escalating action, reaction, camera move]",
+      "[10-15s] [Beat 3: resolution beat, final pose or gesture, camera move]",
+      "",
+      "Camera: [shot type + movement + lens, e.g. 'handheld medium shot, slow push-in, 35mm, shallow depth of field'].",
+      "Environment: [setting details, props, background motion like wind, dust, crowd].",
+      "Lighting: [quality, direction, color temperature, mood].",
+      "",
+      'Voiceover (narrator, voice referenced from @audio1): "<the line>" -- [delivery notes: tone, tempo, pause cues].',
+      "",
+      "Ambient: [2-4 layered SFX / ambient cues].",
+      "Music: [genre, instrumentation, mood, bpm] (optional, one line).",
+      "Style: [render style, MUST match the global visualStyle].",
+      "```",
+      "",
+      "VOICEOVER RULES (inside seedancePrompt):",
+      "- Pacing: ~2.3 words per second. For " + sceneSeconds + "s clip aim for ~" +
+        narrWords + " words.",
+      "- Keep sentences short (5-10 words) for clean lip-sync timing.",
+      "- Always reference @audio1 for the narrator voice so voice stays identical.",
+      "- Include delivery notes (tone, tempo, pause cues) after the quoted line.",
+      "- The voiceover is a NARRATOR speaking OVER the scene (not the character",
+      "  on screen), unless the theme explicitly calls for in-scene dialogue.",
+      "",
+      "NARRATION FIELD (separate, for convenience):",
+      "- Also output the spoken line(s) verbatim in the narration field, with",
+      "  NO delivery notes and NO quotes, so the creator can copy just the",
+      "  words for subtitling or a TTS fallback.",
+      "",
+      "CONTINUITY RULES:",
+      "- Character descriptors in character bible are LAW. Repeat verbatim.",
+      "- visualStyle and lighting mood are LAW. Every scene matches.",
+      "- Narration across ALL scenes reads as ONE script: hook -> development",
+      "  -> payoff -> CTA.",
+      "- Use the tone implied by the theme (humorous, heartfelt, educational,",
+      "  mysterious, etc.).",
+      "",
+      "CAMERA DIRECTION (scene-level summary, short):",
+      "- One short line summarizing the dominant camera behavior of the clip.",
+      "",
+      "OUTPUT FORMAT - RETURN ONLY A JSON OBJECT, NO MARKDOWN, NO BACKTICKS:",
+      "{",
+      '  "title": "Short catchy title",',
+      '  "logline": "One-sentence summary of the arc",',
+      '  "narratorPersona": "Describe the narrator voice, e.g. warm 40s male, dry documentary tone",',
+      '  "visualStyle": "Global visual style every scene must share",',
+      '  "aspectRatio": "' + (isShort ? "9:16" : "16:9") + '",',
+      '  "characterBible": [',
+      '    { "name": "Rex", "description": "Locked visual description" }',
+      "  ],",
+      '  "referenceAssets": [',
+      "    {",
+      '      "slot": "@image1",',
+      '      "type": "image",',
+      '      "purpose": "Primary character visual lock",',
+      '      "howToCreate": "Generate a clean portrait of <character> using this prompt: <image prompt>"',
+      "    },",
+      "    {",
+      '      "slot": "@audio1",',
+      '      "type": "audio",',
+      '      "purpose": "Narrator voice lock",',
+      '      "howToCreate": "Record or TTS 15-30 seconds of the narrator reading any line in the target persona, save as mp3/wav"',
+      "    }",
+      "  ],",
+      '  "format": "' + format + '",',
+      '  "totalDurationSeconds": ' + totalSeconds + ",",
+      '  "scenes": [',
+      "    {",
+      '      "sceneNumber": 1,',
+      '      "duration": ' + sceneSeconds + ",",
+      '      "startImagePrompt": "...",',
+      '      "seedancePrompt": "... (full Seedance 2.0 prompt with @image1, @audio1 references and voiceover embedded) ...",',
+      '      "narration": "Just the spoken words, no quotes or delivery notes",',
+      '      "cameraDirection": "..."',
+      "    }",
+      "  ]",
+      "}",
+      "",
+      "RESPOND WITH ONLY THE JSON. No prose, no markdown fences."
+    ].join("\n");
+  }
+
+  function buildUserPrompt(theme, format) {
+    var isShort = format === "short";
+    return [
+      "THEME: " + theme,
+      "",
+      "Produce the full Seedance 2.0 storyboard now.",
+      isShort
+        ? "Remember: exactly 2 scenes, 15 seconds each, for a YouTube Short (9:16)."
+        : "Remember: exactly 20 scenes, 15 seconds each, for a 5-minute YouTube video (16:9).",
+      "Every seedancePrompt must reference @image1 for the character and @audio1",
+      "for the narrator voice so they stay identical across all clips.",
+      "Lock character/visual details in the character bible and reuse them verbatim."
+    ].join("\n");
+  }
+
+  function buildKitSystemPrompt(format) {
+    var isShort = format === "short";
+    var longOrShort = isShort
+      ? "a YouTube Short / TikTok / Instagram Reel (~30 seconds vertical)"
+      : "a 5-minute long-form YouTube video (with optional repurposed Shorts/Reels/TikTok clips)";
+    return [
+      "You are an elite YouTube + TikTok + Instagram Reels growth strategist.",
+      "Given a video storyboard, produce a COMPLETE publishing kit for all",
+      "three platforms so the creator can paste-and-post to maximize virality.",
+      "",
+      "TARGET FORMAT: " + longOrShort + ".",
+      "",
+      "GUIDING PRINCIPLES:",
+      "- Titles must be clickable but NOT cheap clickbait. Curiosity + payoff.",
+      "- Hooks must grab attention in the first 1-3 seconds (pattern interrupt,",
+      "  bold claim, question, visual shock).",
+      "- Descriptions should have: hook line, 2-3 sentence summary, CTA to",
+      "  subscribe/like, then hashtags at the bottom.",
+      "- Tags should be a mix of broad (high volume) and niche (low competition).",
+      "- Hashtags differ per platform. TikTok loves #fyp #foryou #viral.",
+      "  Instagram Reels loves niche community tags + a few broad. YouTube",
+      "  Shorts: #shorts + 2-3 topical hashtags in the title.",
+      "- Thumbnails/covers are the #1 driver of CTR. Prompt should specify:",
+      "  bold expressive face, high-contrast colors, minimal text, negative",
+      "  space for overlay text, and rule-of-thirds composition.",
+      "- Thumbnail/cover text should be MAX 3-5 words, bold, punchy.",
+      "- Trending sound suggestion should be a TYPE of sound (e.g. 'upbeat",
+      "  orchestral drop', 'viral meme audio', 'lo-fi piano') since specific",
+      "  trending tracks change daily.",
+      "",
+      "OUTPUT FORMAT - RETURN ONLY A JSON OBJECT, NO MARKDOWN, NO BACKTICKS:",
+      "{",
+      '  "hook": "First 1-3 seconds spoken or on-screen hook (one line)",',
+      '  "youtube": {',
+      '    "title": "Max 100 chars, SEO + curiosity",',
+      '    "description": "Full multi-paragraph description. Hook line first, then summary, then CTA, then hashtags at the bottom. Max 5000 chars.",',
+      '    "tags": ["tag1","tag2", "..."],',
+      '    "category": "Entertainment | Comedy | Education | Film & Animation | Howto & Style | People & Blogs | Pets & Animals | etc",',
+      '    "thumbnailPrompt": "Detailed image-generation prompt for a high-CTR thumbnail",',
+      '    "thumbnailText": "MAX 3-5 bold words to overlay on the thumbnail",',
+      '    "chapters": [ { "time": "0:00", "title": "Hook" } ],',
+      '    "pinnedComment": "First comment to pin for engagement",',
+      '    "endScreenCTA": "Closing CTA script"',
+      "  },",
+      '  "tiktok": {',
+      '    "caption": "Punchy caption with hook + hashtags, max 2200 chars",',
+      '    "hashtags": ["#fyp","#viral","..."],',
+      '    "coverPrompt": "Image prompt for TikTok cover frame",',
+      '    "coverText": "MAX 3-5 words for cover overlay",',
+      '    "soundSuggestion": "Type of trending sound to pair with",',
+      '    "bestPostTime": "e.g. 7-10pm EST weekdays"',
+      "  },",
+      '  "instagram": {',
+      '    "reelsCaption": "First line = hook. Then 1-2 sentence body. Then CTA. Then hashtags. Max 2200 chars.",',
+      '    "hashtags": ["#reels","..."],',
+      '    "coverPrompt": "Image prompt for IG reel cover",',
+      '    "coverText": "MAX 3-5 words for cover overlay",',
+      '    "altText": "Accessibility alt text describing the cover image",',
+      '    "bestPostTime": "e.g. 11am-1pm EST weekdays"',
+      "  },",
+      '  "viralStrategy": {',
+      '    "retentionTips": ["Tip 1","Tip 2","Tip 3"],',
+      '    "trendingAngles": ["Angle 1","Angle 2"],',
+      '    "crossPromo": "How to repurpose this across platforms"',
+      "  }",
+      "}",
+      "",
+      "TAG/HASHTAG RULES:",
+      "- youtube.tags: 20-30 items, total under 500 chars combined.",
+      "- tiktok.hashtags: 8-12 items, mix broad + niche. Include the # prefix.",
+      "- instagram.hashtags: 15-25 items. Include the # prefix.",
+      "",
+      "RESPOND WITH ONLY THE JSON. No prose, no markdown fences."
+    ].join("\n");
+  }
+
+  function buildKitUserPrompt(theme, format, storyboard) {
+    var summary = {
+      title: storyboard.title,
+      logline: storyboard.logline,
+      narratorPersona: storyboard.narratorPersona,
+      visualStyle: storyboard.visualStyle,
+      characterBible: storyboard.characterBible,
+      totalDurationSeconds: storyboard.totalDurationSeconds,
+      narration: (storyboard.scenes || [])
+        .map(function (s) { return s.narration || ""; })
+        .join(" ")
+    };
+    return [
+      "THEME: " + theme,
+      "FORMAT: " + format,
+      "",
+      "STORYBOARD SUMMARY (JSON):",
+      JSON.stringify(summary),
+      "",
+      "Produce the complete publishing kit now. Return JSON only."
+    ].join("\n");
+  }
+
+  function extractJson(text) {
+    var s = (text || "").trim();
+    if (s.indexOf("```") === 0) {
+      s = s.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    }
+    try { return JSON.parse(s); } catch (e) {}
+    var m = s.match(/\{[\s\S]*\}/);
+    if (m) return JSON.parse(m[0]);
+    throw new Error("Could not parse JSON from model response.");
+  }
+
+  function renumberScenes(sb) {
+    if (!sb || !Array.isArray(sb.scenes)) return sb;
+    for (var i = 0; i < sb.scenes.length; i++) {
+      if (sb.scenes[i]) sb.scenes[i].sceneNumber = i + 1;
+    }
+    return sb;
+  }
+
+  async function callClaude(apiKey, system, user, maxTokens) {
+    var res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: maxTokens,
+        system: system,
+        messages: [{ role: "user", content: user }]
+      })
+    });
+    if (!res.ok) {
+      var text = await res.text();
+      throw new Error("Claude API error " + res.status + ": " + text);
+    }
+    var data = await res.json();
+    return (data && data.content && data.content[0] && data.content[0].text) || "";
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? "" : s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function copyText(text, btn) {
+    try {
+      navigator.clipboard.writeText(text);
+      var old = btn.textContent;
+      btn.textContent = "Copied";
+      setTimeout(function () { btn.textContent = old; }, 1200);
+    } catch (e) {}
+  }
+
+  function renderBlock(label, value, accent) {
+    if (!value) return "";
+    var id = "b" + Math.random().toString(36).slice(2, 9);
+    return (
+      '<div class="block" style="border-left-color:' + accent + '">' +
+        '<div class="bhead">' +
+          '<div class="bl" style="color:' + accent + '">' + escapeHtml(label) + "</div>" +
+          '<button class="copybtn" data-copy-id="' + id + '">Copy</button>' +
+        "</div>" +
+        '<div class="bv" id="' + id + '">' + escapeHtml(value) + "</div>" +
+      "</div>"
+    );
+  }
+
+  function render(storyboard) {
+    var sb = storyboard;
+    var html = "";
+
+    html += '<div class="card summary">';
+    html += '<div class="spread">';
+    html += '<div style="flex:1;min-width:260px">';
+    html += '<div class="tag">' +
+      (sb.format === "short" ? "YouTube Short" : "YouTube Video") +
+      " &middot; " + (sb.totalDurationSeconds || 0) + "s &middot; " +
+      ((sb.scenes && sb.scenes.length) || 0) + " scenes</div>";
+    html += "<h2>" + escapeHtml(sb.title || "Untitled") + "</h2>";
+    html += '<p class="log">' + escapeHtml(sb.logline || "") + "</p>";
+    html += "</div>";
+    html += '<div class="row" style="gap:8px">';
+    html += '<button class="ghost" id="copy-all">Copy Full Script</button>';
+    html += '<button class="ghost" id="copy-narration">Copy Narration</button>';
+    html += "</div>";
+    html += "</div>";
+
+    html += '<div class="grid" style="margin-top:16px">';
+    if (sb.narratorPersona) {
+      html += '<div class="meta"><div class="ll2">Narrator</div><div class="vv">' +
+        escapeHtml(sb.narratorPersona) + "</div></div>";
+    }
+    if (sb.visualStyle) {
+      html += '<div class="meta"><div class="ll2">Visual Style</div><div class="vv">' +
+        escapeHtml(sb.visualStyle) + "</div></div>";
+    }
+    html += "</div>";
+
+    if (sb.characterBible && sb.characterBible.length) {
+      html += '<div style="margin-top:16px">';
+      html += '<div class="ll" style="margin-bottom:8px">Character Bible</div>';
+      for (var i = 0; i < sb.characterBible.length; i++) {
+        var c = sb.characterBible[i];
+        html += '<div class="char"><strong>' +
+          escapeHtml(c.name || "?") + "</strong> &mdash; " +
+          escapeHtml(c.description || "") + "</div>";
+      }
+      html += "</div>";
+    }
+    html += "</div>";
+
+    // Reference Assets panel - what to upload to Higgsfield
+    if (sb.referenceAssets && sb.referenceAssets.length) {
+      html += '<div class="card" style="border-color:#a78bfa">';
+      html += '<div class="ll" style="margin-bottom:6px;color:#a78bfa">Reference Assets to Upload to Higgsfield</div>';
+      html += '<p class="hint" style="margin-top:0;margin-bottom:12px">Upload these once. Every scene\'s Seedance prompt will reference them by @slot for locked character + narrator voice.</p>';
+      for (var ra = 0; ra < sb.referenceAssets.length; ra++) {
+        var r = sb.referenceAssets[ra];
+        html += '<div class="char" style="border-color:#a78bfa">';
+        html += '<strong style="color:#a78bfa">' + escapeHtml(r.slot || "") + "</strong>";
+        if (r.type) html += ' <span class="tag" style="margin-left:6px">' + escapeHtml(r.type) + "</span>";
+        html += "<div style=\"margin-top:6px\"><strong>Purpose:</strong> " + escapeHtml(r.purpose || "") + "</div>";
+        if (r.howToCreate) {
+          html += '<div style="margin-top:4px"><strong>How to create:</strong> ' +
+            escapeHtml(r.howToCreate) + "</div>";
+        }
+        html += "</div>";
+      }
+      html += "</div>";
+    }
+
+    var scenes = sb.scenes || [];
+    for (var j = 0; j < scenes.length; j++) {
+      var s = scenes[j];
+      var n = s.sceneNumber || (j + 1);
+      html += '<div class="scene">';
+      html += '<div class="head">';
+      html += '<div class="row" style="gap:10px">';
+      html += '<div class="chip">SCENE ' + n + " / " + scenes.length + "</div>";
+      html += '<div class="dur">' + (s.duration || 0) + "s</div>";
+      html += "</div>";
+      html += '<div class="cam">' + escapeHtml(s.cameraDirection || "") + "</div>";
+      html += "</div>";
+
+      html += renderBlock("Opening Image Prompt (generate this image first)", s.startImagePrompt, "#60a5fa");
+      html += renderBlock("Seedance 2.0 Prompt (paste into Higgsfield)", s.seedancePrompt, "#a78bfa");
+      html += renderBlock("Narration (spoken words only)", s.narration, "#f472b6");
+      html += "</div>";
+    }
+
+    outEl.innerHTML = html;
+
+    // Wire copy buttons
+    var copyBtns = outEl.querySelectorAll("[data-copy-id]");
+    for (var k = 0; k < copyBtns.length; k++) {
+      (function (btn) {
+        btn.addEventListener("click", function () {
+          var target = document.getElementById(btn.getAttribute("data-copy-id"));
+          if (target) copyText(target.textContent, btn);
+        });
+      })(copyBtns[k]);
+    }
+
+    var copyAllBtn = document.getElementById("copy-all");
+    if (copyAllBtn) {
+      copyAllBtn.addEventListener("click", function () {
+        copyText(buildFullScript(sb), copyAllBtn);
+      });
+    }
+    var copyNarrBtn = document.getElementById("copy-narration");
+    if (copyNarrBtn) {
+      copyNarrBtn.addEventListener("click", function () {
+        var lines = (sb.scenes || []).map(function (x) { return x.narration || ""; });
+        copyText(lines.join("\n\n"), copyNarrBtn);
+      });
+    }
+  }
+
+  function renderKit(kit, theme, format) {
+    if (!kit) return;
+    var yt = kit.youtube || {};
+    var tt = kit.tiktok || {};
+    var ig = kit.instagram || {};
+    var vs = kit.viralStrategy || {};
+
+    var html = '<div class="kit-section" id="kit-section">';
+    html += '<h2 class="kit-title">Publishing Kit</h2>';
+    html += '<p class="kit-sub">Paste-and-post content for YouTube, TikTok, and Instagram Reels.</p>';
+
+    if (kit.hook) {
+      html += '<div class="platform">';
+      html += '<h3><span class="plat-badge badge-viral">HOOK</span> First 1-3 Seconds</h3>';
+      html += '<p class="plat-desc">This must grab attention immediately. Say/show it first.</p>';
+      html += renderBlock("Opening Hook", kit.hook, "#f59e0b");
+      html += "</div>";
+    }
+
+    // YouTube
+    html += '<div class="platform">';
+    html += '<h3><span class="plat-badge badge-yt">YOUTUBE</span> ' +
+      (format === "short" ? "Shorts" : "Long-form") + "</h3>";
+    html += '<p class="plat-desc">Title + description + tags + thumbnail prompt.</p>';
+    if (yt.title) html += renderBlock("Title (max 100 chars)", yt.title, "#f87171");
+    if (yt.description) html += renderBlock("Description", yt.description, "#f87171");
+
+    if (yt.tags && yt.tags.length) {
+      html += '<div class="block" style="border-left-color:#f87171">';
+      html += '<div class="bhead"><div class="bl" style="color:#f87171">Tags</div>' +
+        '<button class="copybtn" id="yt-tags-copy">Copy</button></div>';
+      html += '<div class="tags" id="yt-tags-list">';
+      for (var i = 0; i < yt.tags.length; i++) {
+        html += '<span class="tag">' + escapeHtml(yt.tags[i]) + "</span>";
+      }
+      html += "</div></div>";
+    }
+
+    if (yt.category) html += renderBlock("Category", yt.category, "#f87171");
+    if (yt.thumbnailPrompt) html += renderBlock("Thumbnail Image Prompt", yt.thumbnailPrompt, "#60a5fa");
+    if (yt.thumbnailText) html += renderBlock("Thumbnail Text Overlay (max 3-5 words)", yt.thumbnailText, "#60a5fa");
+
+    if (yt.chapters && yt.chapters.length) {
+      html += '<div class="block" style="border-left-color:#f87171">';
+      html += '<div class="bhead"><div class="bl" style="color:#f87171">Chapters</div></div>';
+      html += '<ol class="chapters">';
+      for (var c = 0; c < yt.chapters.length; c++) {
+        var ch = yt.chapters[c];
+        html += '<li><span class="chapter-time">' + escapeHtml(ch.time || "") +
+          "</span>" + escapeHtml(ch.title || "") + "</li>";
+      }
+      html += "</ol></div>";
+    }
+
+    if (yt.pinnedComment) html += renderBlock("Pinned Comment", yt.pinnedComment, "#f87171");
+    if (yt.endScreenCTA) html += renderBlock("End Screen CTA", yt.endScreenCTA, "#f87171");
+    html += "</div>";
+
+    // TikTok
+    html += '<div class="platform">';
+    html += '<h3><span class="plat-badge badge-tt">TIKTOK</span></h3>';
+    html += '<p class="plat-desc">Caption, hashtags, cover, and sound suggestion.</p>';
+    if (tt.caption) html += renderBlock("Caption", tt.caption, "#22d3ee");
+
+    if (tt.hashtags && tt.hashtags.length) {
+      html += '<div class="block" style="border-left-color:#22d3ee">';
+      html += '<div class="bhead"><div class="bl" style="color:#22d3ee">Hashtags</div>' +
+        '<button class="copybtn" id="tt-tags-copy">Copy</button></div>';
+      html += '<div class="tags" id="tt-tags-list">';
+      for (var j = 0; j < tt.hashtags.length; j++) {
+        html += '<span class="tag">' + escapeHtml(tt.hashtags[j]) + "</span>";
+      }
+      html += "</div></div>";
+    }
+
+    if (tt.coverPrompt) html += renderBlock("Cover Image Prompt", tt.coverPrompt, "#60a5fa");
+    if (tt.coverText) html += renderBlock("Cover Text Overlay", tt.coverText, "#60a5fa");
+    if (tt.soundSuggestion) html += renderBlock("Sound Suggestion", tt.soundSuggestion, "#22d3ee");
+    if (tt.bestPostTime) html += renderBlock("Best Post Time", tt.bestPostTime, "#22d3ee");
+    html += "</div>";
+
+    // Instagram
+    html += '<div class="platform">';
+    html += '<h3><span class="plat-badge badge-ig">INSTAGRAM REELS</span></h3>';
+    html += '<p class="plat-desc">Reel caption, hashtags, cover, and alt text.</p>';
+    if (ig.reelsCaption) html += renderBlock("Reels Caption", ig.reelsCaption, "#e879f9");
+
+    if (ig.hashtags && ig.hashtags.length) {
+      html += '<div class="block" style="border-left-color:#e879f9">';
+      html += '<div class="bhead"><div class="bl" style="color:#e879f9">Hashtags</div>' +
+        '<button class="copybtn" id="ig-tags-copy">Copy</button></div>';
+      html += '<div class="tags" id="ig-tags-list">';
+      for (var k = 0; k < ig.hashtags.length; k++) {
+        html += '<span class="tag">' + escapeHtml(ig.hashtags[k]) + "</span>";
+      }
+      html += "</div></div>";
+    }
+
+    if (ig.coverPrompt) html += renderBlock("Cover Image Prompt", ig.coverPrompt, "#60a5fa");
+    if (ig.coverText) html += renderBlock("Cover Text Overlay", ig.coverText, "#60a5fa");
+    if (ig.altText) html += renderBlock("Alt Text (accessibility)", ig.altText, "#e879f9");
+    if (ig.bestPostTime) html += renderBlock("Best Post Time", ig.bestPostTime, "#e879f9");
+    html += "</div>";
+
+    // Viral strategy
+    if (vs && (vs.retentionTips || vs.trendingAngles || vs.crossPromo)) {
+      html += '<div class="platform">';
+      html += '<h3><span class="plat-badge badge-viral">VIRAL STRATEGY</span></h3>';
+      html += '<p class="plat-desc">Retention, trending angles, and cross-platform repurposing.</p>';
+
+      if (vs.retentionTips && vs.retentionTips.length) {
+        html += '<div class="block" style="border-left-color:#22c55e">';
+        html += '<div class="bhead"><div class="bl" style="color:#22c55e">Retention Tips</div></div>';
+        html += '<ul class="bullets">';
+        for (var r = 0; r < vs.retentionTips.length; r++) {
+          html += "<li>" + escapeHtml(vs.retentionTips[r]) + "</li>";
+        }
+        html += "</ul></div>";
+      }
+      if (vs.trendingAngles && vs.trendingAngles.length) {
+        html += '<div class="block" style="border-left-color:#22c55e">';
+        html += '<div class="bhead"><div class="bl" style="color:#22c55e">Trending Angles</div></div>';
+        html += '<ul class="bullets">';
+        for (var t = 0; t < vs.trendingAngles.length; t++) {
+          html += "<li>" + escapeHtml(vs.trendingAngles[t]) + "</li>";
+        }
+        html += "</ul></div>";
+      }
+      if (vs.crossPromo) {
+        html += renderBlock("Cross-Platform Repurposing", vs.crossPromo, "#22c55e");
+      }
+      html += "</div>";
+    }
+
+    // Copy entire kit button
+    html += '<div style="text-align:center;margin-top:10px">';
+    html += '<button class="ghost" id="copy-kit">Copy Entire Publishing Kit</button>';
+    html += "</div>";
+
+    html += "</div>"; // kit-section
+
+    // Append to output
+    var kitContainer = document.createElement("div");
+    kitContainer.innerHTML = html;
+    outEl.appendChild(kitContainer);
+
+    // Wire copy buttons for each block
+    var copyBtns = kitContainer.querySelectorAll("[data-copy-id]");
+    for (var kb = 0; kb < copyBtns.length; kb++) {
+      (function (btn) {
+        btn.addEventListener("click", function () {
+          var target = document.getElementById(btn.getAttribute("data-copy-id"));
+          if (target) copyText(target.textContent, btn);
+        });
+      })(copyBtns[kb]);
+    }
+
+    // Tag list copy buttons (space-separated for hashtags, comma for YT tags)
+    wireTagCopy("yt-tags-copy", "yt-tags-list", ", ");
+    wireTagCopy("tt-tags-copy", "tt-tags-list", " ");
+    wireTagCopy("ig-tags-copy", "ig-tags-list", " ");
+
+    var copyKitBtn = document.getElementById("copy-kit");
+    if (copyKitBtn) {
+      copyKitBtn.addEventListener("click", function () {
+        copyText(buildKitText(kit, theme, format), copyKitBtn);
+      });
+    }
+  }
+
+  function wireTagCopy(btnId, listId, sep) {
+    var btn = document.getElementById(btnId);
+    var list = document.getElementById(listId);
+    if (!btn || !list) return;
+    btn.addEventListener("click", function () {
+      var items = list.querySelectorAll(".tag");
+      var arr = [];
+      for (var i = 0; i < items.length; i++) arr.push(items[i].textContent);
+      copyText(arr.join(sep), btn);
+    });
+  }
+
+  function buildKitText(kit, theme, format) {
+    var yt = kit.youtube || {};
+    var tt = kit.tiktok || {};
+    var ig = kit.instagram || {};
+    var vs = kit.viralStrategy || {};
+    var lines = [];
+    lines.push("PUBLISHING KIT");
+    lines.push("THEME: " + theme);
+    lines.push("FORMAT: " + format);
+    if (kit.hook) {
+      lines.push("");
+      lines.push("HOOK (first 1-3 seconds):");
+      lines.push(kit.hook);
+    }
+    lines.push("");
+    lines.push("===== YOUTUBE =====");
+    if (yt.title) lines.push("TITLE: " + yt.title);
+    if (yt.category) lines.push("CATEGORY: " + yt.category);
+    if (yt.description) {
+      lines.push("");
+      lines.push("DESCRIPTION:");
+      lines.push(yt.description);
+    }
+    if (yt.tags && yt.tags.length) {
+      lines.push("");
+      lines.push("TAGS: " + yt.tags.join(", "));
+    }
+    if (yt.thumbnailPrompt) {
+      lines.push("");
+      lines.push("THUMBNAIL IMAGE PROMPT:");
+      lines.push(yt.thumbnailPrompt);
+    }
+    if (yt.thumbnailText) lines.push("THUMBNAIL TEXT OVERLAY: " + yt.thumbnailText);
+    if (yt.chapters && yt.chapters.length) {
+      lines.push("");
+      lines.push("CHAPTERS:");
+      yt.chapters.forEach(function (c) {
+        lines.push((c.time || "") + " " + (c.title || ""));
+      });
+    }
+    if (yt.pinnedComment) {
+      lines.push("");
+      lines.push("PINNED COMMENT: " + yt.pinnedComment);
+    }
+    if (yt.endScreenCTA) lines.push("END SCREEN CTA: " + yt.endScreenCTA);
+
+    lines.push("");
+    lines.push("===== TIKTOK =====");
+    if (tt.caption) lines.push("CAPTION: " + tt.caption);
+    if (tt.hashtags && tt.hashtags.length) lines.push("HASHTAGS: " + tt.hashtags.join(" "));
+    if (tt.coverPrompt) {
+      lines.push("");
+      lines.push("COVER IMAGE PROMPT:");
+      lines.push(tt.coverPrompt);
+    }
+    if (tt.coverText) lines.push("COVER TEXT OVERLAY: " + tt.coverText);
+    if (tt.soundSuggestion) lines.push("SOUND: " + tt.soundSuggestion);
+    if (tt.bestPostTime) lines.push("BEST POST TIME: " + tt.bestPostTime);
+
+    lines.push("");
+    lines.push("===== INSTAGRAM REELS =====");
+    if (ig.reelsCaption) lines.push("CAPTION: " + ig.reelsCaption);
+    if (ig.hashtags && ig.hashtags.length) lines.push("HASHTAGS: " + ig.hashtags.join(" "));
+    if (ig.coverPrompt) {
+      lines.push("");
+      lines.push("COVER IMAGE PROMPT:");
+      lines.push(ig.coverPrompt);
+    }
+    if (ig.coverText) lines.push("COVER TEXT OVERLAY: " + ig.coverText);
+    if (ig.altText) lines.push("ALT TEXT: " + ig.altText);
+    if (ig.bestPostTime) lines.push("BEST POST TIME: " + ig.bestPostTime);
+
+    if (vs && (vs.retentionTips || vs.trendingAngles || vs.crossPromo)) {
+      lines.push("");
+      lines.push("===== VIRAL STRATEGY =====");
+      if (vs.retentionTips && vs.retentionTips.length) {
+        lines.push("RETENTION TIPS:");
+        vs.retentionTips.forEach(function (x) { lines.push("- " + x); });
+      }
+      if (vs.trendingAngles && vs.trendingAngles.length) {
+        lines.push("TRENDING ANGLES:");
+        vs.trendingAngles.forEach(function (x) { lines.push("- " + x); });
+      }
+      if (vs.crossPromo) {
+        lines.push("CROSS-PROMO: " + vs.crossPromo);
+      }
+    }
+    return lines.join("\n");
+  }
+
+  function buildFullScript(sb) {
+    var lines = [];
+    lines.push("TITLE: " + (sb.title || ""));
+    lines.push("LOGLINE: " + (sb.logline || ""));
+    lines.push("NARRATOR: " + (sb.narratorPersona || ""));
+    lines.push("VISUAL STYLE: " + (sb.visualStyle || ""));
+    lines.push("ASPECT RATIO: " + (sb.aspectRatio || ""));
+    if (sb.characterBible && sb.characterBible.length) {
+      lines.push("");
+      lines.push("CHARACTER BIBLE:");
+      sb.characterBible.forEach(function (c) {
+        lines.push("- " + (c.name || "?") + ": " + (c.description || ""));
+      });
+    }
+    if (sb.referenceAssets && sb.referenceAssets.length) {
+      lines.push("");
+      lines.push("REFERENCE ASSETS (upload to Higgsfield once):");
+      sb.referenceAssets.forEach(function (r) {
+        lines.push("- " + (r.slot || "") + " [" + (r.type || "") + "]: " +
+          (r.purpose || ""));
+        if (r.howToCreate) lines.push("    How to create: " + r.howToCreate);
+      });
+    }
+    lines.push("");
+    lines.push(
+      "TOTAL DURATION: " + (sb.totalDurationSeconds || 0) + "s across " +
+        ((sb.scenes || []).length) + " scenes"
+    );
+    lines.push("");
+    (sb.scenes || []).forEach(function (s) {
+      lines.push("===== SCENE " + s.sceneNumber + " (" + s.duration + "s) =====");
+      lines.push("CAMERA: " + (s.cameraDirection || ""));
+      lines.push("");
+      lines.push("OPENING IMAGE PROMPT:");
+      lines.push(s.startImagePrompt || "");
+      lines.push("");
+      lines.push("SEEDANCE 2.0 PROMPT:");
+      lines.push(s.seedancePrompt || "");
+      lines.push("");
+      lines.push("NARRATION (spoken words only):");
+      lines.push(s.narration || "");
+      lines.push("");
+    });
+    return lines.join("\n");
+  }
+
+  async function generate() {
+    clearError();
+    outEl.innerHTML = "";
+    var theme = themeEl.value.trim();
+    var apiKey = keyEl.value.trim();
+    if (!theme) return;
+    if (!apiKey) {
+      showError("Please add your Anthropic API key (expand the section below the button).");
+      return;
+    }
+    try { localStorage.setItem("anthropic_api_key", apiKey); } catch (e) {}
+
+    goBtn.disabled = true;
+    setLoading(
+      true,
+      format === "video"
+        ? "Storyboarding a 5-minute video for Seedance 2.0. This can take up to 60 seconds..."
+        : "Storyboarding your Short for Seedance 2.0..."
+    );
+
+    try {
+      var sys = buildSystemPrompt(format);
+      var usr = buildUserPrompt(theme, format);
+      var maxTokens = format === "short" ? 4000 : 16000;
+      var text = await callClaude(apiKey, sys, usr, maxTokens);
+      var sb = extractJson(text);
+      sb = renumberScenes(sb);
+      if (!sb.format) sb.format = format;
+      if (!sb.aspectRatio) sb.aspectRatio = format === "short" ? "9:16" : "16:9";
+      if (!sb.totalDurationSeconds) sb.totalDurationSeconds = format === "short" ? 30 : 300;
+      if (!Array.isArray(sb.scenes)) sb.scenes = [];
+      render(sb);
+
+      // Second call: generate the publishing kit
+      setLoading(true, "Generating publishing kit for YouTube, TikTok, and Instagram Reels...");
+      try {
+        var kitSys = buildKitSystemPrompt(format);
+        var kitUsr = buildKitUserPrompt(theme, format, sb);
+        var kitText = await callClaude(apiKey, kitSys, kitUsr, 4000);
+        var kit = extractJson(kitText);
+        renderKit(kit, theme, format);
+      } catch (ke) {
+        console.error(ke);
+        var warn = document.createElement("div");
+        warn.className = "err";
+        warn.style.marginTop = "18px";
+        warn.textContent = "Storyboard succeeded but publishing kit failed: " +
+          (ke.message || "unknown error");
+        outEl.appendChild(warn);
+      }
+    } catch (e) {
+      showError(e.message || "Generation failed");
+    } finally {
+      setLoading(false, "");
+      goBtn.disabled = !themeEl.value.trim();
+    }
+  }
+
+  goBtn.addEventListener("click", generate);
+  themeEl.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !goBtn.disabled) generate();
+  });
+})();
+</script>
+</body>
+</html>
