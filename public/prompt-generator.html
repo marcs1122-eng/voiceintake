@@ -365,10 +365,10 @@
   <header style="margin-bottom:22px">
     <h1>AI Image + Video Prompt Generator</h1>
     <p>
-      Type a theme. Get a full storyboard (image prompts + Veo 3.0 video
-      prompts + narration) AND a complete publishing kit for YouTube,
-      TikTok, and Instagram Reels — titles, descriptions, tags, hashtags,
-      thumbnail prompts, hooks, and viral strategy.
+      Type a theme. Get a full storyboard tuned for <strong>Seedance 2.0</strong>
+      (Higgsfield) — one opening image prompt + one Seedance prompt with
+      embedded voiceover per scene — plus a complete publishing kit for
+      YouTube, TikTok, and Instagram Reels.
     </p>
   </header>
 
@@ -384,11 +384,11 @@
     <div class="row" style="margin-top:14px">
       <button type="button" class="pill active" data-format="short" id="pill-short">
         <div class="t">YouTube Short</div>
-        <div class="s">2 clips &middot; 30s total</div>
+        <div class="s">2 clips &middot; 15s each &middot; 9:16</div>
       </button>
       <button type="button" class="pill" data-format="video" id="pill-video">
         <div class="t">YouTube Video</div>
-        <div class="s">~38 clips &middot; 5 min total</div>
+        <div class="s">20 clips &middot; 15s each &middot; 16:9</div>
       </button>
       <div class="grow"></div>
       <button id="go" class="primary" disabled>Generate Storyboard</button>
@@ -477,71 +477,131 @@
 
   function buildSystemPrompt(format) {
     var isShort = format === "short";
-    var sceneCount = isShort ? 2 : 38;
-    var sceneSeconds = isShort ? 15 : 8;
+    var sceneCount = isShort ? 2 : 20;
+    var sceneSeconds = 15; // Seedance 2.0 max clip = 15s (Higgsfield paid)
     var totalSeconds = isShort ? 30 : 300;
     var totalLabel = isShort ? "30-second YouTube Short" : "5-minute YouTube video";
+    var aspect = isShort ? "9:16 vertical" : "16:9 horizontal";
     var narrWords = Math.round(sceneSeconds * 2.3);
 
     return [
-      "You are a world-class AI video director and prompt engineer.",
-      "Your job: turn a single theme into a fully-storyboarded, narrator-driven",
-      "video, specified as a sequence of scenes that can be produced with an",
-      "image generator (for keyframes) and Google Veo 3.0 (for image-to-video).",
+      "You are a world-class AI video director and prompt engineer for",
+      "Seedance 2.0 (ByteDance) running on Higgsfield.",
       "",
-      "TARGET FORMAT: " + totalLabel + ".",
+      "ABOUT SEEDANCE 2.0 (CRITICAL FOR PROMPTING):",
+      "- Image-to-video with NATIVE SYNCHRONIZED AUDIO in a single pass.",
+      "- It generates video + voiceover + dialogue (with lip sync) + SFX +",
+      "  ambient + music all from ONE text prompt plus reference files.",
+      "- Max clip length 15 seconds, 720p on Higgsfield paid tier.",
+      "- Prompts can be up to 5,000 characters.",
+      "- Recommended structure inside each prompt:",
+      "  Subject -> Action -> Camera -> Environment -> Lighting -> Audio / Mood",
+      "- Supports timeline markers for multi-beat scenes: [0-3s] ... [3-6s] ...",
+      "- Supports up to 12 reference files (images, video, audio) via @-tags:",
+      "  @image1, @image2, @video1, @audio1. Use @image1 to lock a character",
+      "  appearance and @audio1 to lock the narrator voice across EVERY scene.",
+      "",
+      "TARGET FORMAT: " + totalLabel + ", " + aspect + ".",
       "TOTAL SCENES: exactly " + sceneCount + ".",
       "EACH SCENE DURATION: " + sceneSeconds + " seconds.",
       "TOTAL DURATION: " + totalSeconds + " seconds.",
       "",
-      "CRITICAL CONTINUITY RULE:",
-      "The endImagePrompt of scene N MUST be IDENTICAL to the startImagePrompt",
-      "of scene N+1. This is how we chain Veo 3.0 clips into one continuous",
-      "video: the last frame of a clip is the first frame of the next clip.",
-      "Scene 1 has a fresh startImagePrompt. The final scene has an endImagePrompt",
-      "that provides a satisfying visual resolution (it is not reused).",
+      "OUR WORKFLOW (what the creator will do):",
+      "1. Generate the opening keyframe image for each scene using startImagePrompt.",
+      "2. Upload 1-4 reference assets to Higgsfield ONCE: a locked character",
+      "   reference image (@image1) and a locked narrator voice sample (@audio1).",
+      "   You define what these references are in referenceAssets below.",
+      "3. For each scene, upload the opening keyframe as the starting image and",
+      "   paste seedancePrompt into the Seedance 2.0 prompt box.",
+      "4. Seedance 2.0 produces a " + sceneSeconds + "s clip with video AND audio in one pass.",
       "",
-      "IMAGE PROMPT GUIDELINES (for startImagePrompt and endImagePrompt):",
-      "- Write a single rich paragraph, 40-80 words.",
-      "- Describe subject, action/pose, setting, lighting, mood, color palette,",
-      "  camera lens, composition, and rendering style (cinematic photo, Pixar",
-      "  3D, anime, claymation, etc.).",
-      "- Lock in CONSISTENT character details (species, fur color, clothing,",
-      "  personality quirks, proportions) so the same characters reappear across",
-      "  scenes without drifting. Repeat those locked descriptors every time the",
-      "  character is on screen.",
-      "- Do NOT reference other scenes by number. Each prompt must be self-contained.",
+      "REFERENCE ASSETS RULES:",
+      "- Always define @image1 as the primary character reference (visual lock).",
+      "- Always define @audio1 as the narrator voice reference (voice lock).",
+      "- If the theme has a second recurring character, define @image2.",
+      "- If there is a signature sound/music bed, define @audio2.",
+      "- Max 4 references total. Keep it simple.",
+      "- For each reference, describe what the creator should generate/record,",
+      "  so they know exactly what file to upload to that @slot.",
       "",
-      "VIDEO PROMPT GUIDELINES (for videoPrompt - Veo 3.0):",
-      "- 30-60 words describing the MOTION between the start and end frames.",
-      "- Specify: subject action, camera movement (dolly, pan, push in, orbit,",
-      "  handheld, static), environmental motion (wind, dust, water, lighting",
-      "  shift), and pacing.",
-      "- Veo 3.0 is image-to-video, so assume the start frame is already fixed.",
-      "- Do NOT restate the entire scene - only what changes and moves.",
-      "- Include ambient audio cues when useful.",
+      "IMAGE PROMPT GUIDELINES (startImagePrompt):",
+      "- This is the OPENING KEYFRAME only. 40-80 word paragraph.",
+      "- Include: subject, pose, setting, composition, lens, lighting, mood,",
+      "  color palette, rendering style.",
+      "- Repeat the locked character descriptors VERBATIM from the character",
+      "  bible every time that character appears.",
+      "- Use " + aspect + " framing.",
+      "- Do NOT reference other scenes by number.",
       "",
-      "NARRATION GUIDELINES:",
-      "- Write the narrator's actual spoken line for this scene.",
-      "- Target ~2.3 words per second of scene time. For an " + sceneSeconds +
-        "-second scene that is about " + narrWords + " words.",
-      "- Keep the voice consistent across scenes.",
-      "- The narration across all scenes must read like ONE coherent script -",
-      "  a beginning, middle, and end. Use the tone implied by the theme.",
-      "- Do not repeat the theme verbatim. Do not use stage directions in the",
-      "  narration field - only the words the narrator says.",
+      "SEEDANCE 2.0 PROMPT GUIDELINES (seedancePrompt) - THIS IS THE CORE:",
+      "Each seedancePrompt is ~200-400 words and MUST follow this template:",
       "",
-      "CAMERA DIRECTION GUIDELINES:",
-      "- One short line: shot type + movement + lens feel.",
+      "```",
+      "[Subject with locked character descriptors] [opening pose / action]. Reference @image1 for character appearance.",
+      "",
+      "[0-4s] [Beat 1: specific action, micro-expression, subtle movement, camera move]",
+      "[4-10s] [Beat 2: escalating action, reaction, camera move]",
+      "[10-15s] [Beat 3: resolution beat, final pose or gesture, camera move]",
+      "",
+      "Camera: [shot type + movement + lens, e.g. 'handheld medium shot, slow push-in, 35mm, shallow depth of field'].",
+      "Environment: [setting details, props, background motion like wind, dust, crowd].",
+      "Lighting: [quality, direction, color temperature, mood].",
+      "",
+      'Voiceover (narrator, voice referenced from @audio1): "<the line>" -- [delivery notes: tone, tempo, pause cues].',
+      "",
+      "Ambient: [2-4 layered SFX / ambient cues].",
+      "Music: [genre, instrumentation, mood, bpm] (optional, one line).",
+      "Style: [render style, MUST match the global visualStyle].",
+      "```",
+      "",
+      "VOICEOVER RULES (inside seedancePrompt):",
+      "- Pacing: ~2.3 words per second. For " + sceneSeconds + "s clip aim for ~" +
+        narrWords + " words.",
+      "- Keep sentences short (5-10 words) for clean lip-sync timing.",
+      "- Always reference @audio1 for the narrator voice so voice stays identical.",
+      "- Include delivery notes (tone, tempo, pause cues) after the quoted line.",
+      "- The voiceover is a NARRATOR speaking OVER the scene (not the character",
+      "  on screen), unless the theme explicitly calls for in-scene dialogue.",
+      "",
+      "NARRATION FIELD (separate, for convenience):",
+      "- Also output the spoken line(s) verbatim in the narration field, with",
+      "  NO delivery notes and NO quotes, so the creator can copy just the",
+      "  words for subtitling or a TTS fallback.",
+      "",
+      "CONTINUITY RULES:",
+      "- Character descriptors in character bible are LAW. Repeat verbatim.",
+      "- visualStyle and lighting mood are LAW. Every scene matches.",
+      "- Narration across ALL scenes reads as ONE script: hook -> development",
+      "  -> payoff -> CTA.",
+      "- Use the tone implied by the theme (humorous, heartfelt, educational,",
+      "  mysterious, etc.).",
+      "",
+      "CAMERA DIRECTION (scene-level summary, short):",
+      "- One short line summarizing the dominant camera behavior of the clip.",
       "",
       "OUTPUT FORMAT - RETURN ONLY A JSON OBJECT, NO MARKDOWN, NO BACKTICKS:",
       "{",
-      '  "title": "Short catchy title for the video",',
-      '  "logline": "One-sentence summary of the story arc",',
-      '  "narratorPersona": "Describe the narrator voice",',
+      '  "title": "Short catchy title",',
+      '  "logline": "One-sentence summary of the arc",',
+      '  "narratorPersona": "Describe the narrator voice, e.g. warm 40s male, dry documentary tone",',
       '  "visualStyle": "Global visual style every scene must share",',
+      '  "aspectRatio": "' + (isShort ? "9:16" : "16:9") + '",',
       '  "characterBible": [',
       '    { "name": "Rex", "description": "Locked visual description" }',
+      "  ],",
+      '  "referenceAssets": [',
+      "    {",
+      '      "slot": "@image1",',
+      '      "type": "image",',
+      '      "purpose": "Primary character visual lock",',
+      '      "howToCreate": "Generate a clean portrait of <character> using this prompt: <image prompt>"',
+      "    },",
+      "    {",
+      '      "slot": "@audio1",',
+      '      "type": "audio",',
+      '      "purpose": "Narrator voice lock",',
+      '      "howToCreate": "Record or TTS 15-30 seconds of the narrator reading any line in the target persona, save as mp3/wav"',
+      "    }",
       "  ],",
       '  "format": "' + format + '",',
       '  "totalDurationSeconds": ' + totalSeconds + ",",
@@ -550,9 +610,8 @@
       '      "sceneNumber": 1,',
       '      "duration": ' + sceneSeconds + ",",
       '      "startImagePrompt": "...",',
-      '      "endImagePrompt": "...",',
-      '      "videoPrompt": "...",',
-      '      "narration": "...",',
+      '      "seedancePrompt": "... (full Seedance 2.0 prompt with @image1, @audio1 references and voiceover embedded) ...",',
+      '      "narration": "Just the spoken words, no quotes or delivery notes",',
       '      "cameraDirection": "..."',
       "    }",
       "  ]",
@@ -567,11 +626,12 @@
     return [
       "THEME: " + theme,
       "",
-      "Produce the full storyboard now.",
+      "Produce the full Seedance 2.0 storyboard now.",
       isShort
-        ? "Remember: exactly 2 scenes, 15 seconds each, for a YouTube Short."
-        : "Remember: exactly 38 scenes, 8 seconds each, for a 5-minute YouTube video.",
-      "Every scene's endImagePrompt must equal the next scene's startImagePrompt.",
+        ? "Remember: exactly 2 scenes, 15 seconds each, for a YouTube Short (9:16)."
+        : "Remember: exactly 20 scenes, 15 seconds each, for a 5-minute YouTube video (16:9).",
+      "Every seedancePrompt must reference @image1 for the character and @audio1",
+      "for the narrator voice so they stay identical across all clips.",
       "Lock character/visual details in the character bible and reuse them verbatim."
     ].join("\n");
   }
@@ -686,16 +746,11 @@
     throw new Error("Could not parse JSON from model response.");
   }
 
-  function enforceChain(sb) {
+  function renumberScenes(sb) {
     if (!sb || !Array.isArray(sb.scenes)) return sb;
-    var s = sb.scenes;
-    for (var i = 1; i < s.length; i++) {
-      if (s[i - 1] && s[i - 1].endImagePrompt && s[i]) {
-        s[i].startImagePrompt = s[i - 1].endImagePrompt;
-      }
-      if (s[i]) s[i].sceneNumber = i + 1;
+    for (var i = 0; i < sb.scenes.length; i++) {
+      if (sb.scenes[i]) sb.scenes[i].sceneNumber = i + 1;
     }
-    if (s[0]) s[0].sceneNumber = 1;
     return sb;
   }
 
@@ -799,6 +854,26 @@
     }
     html += "</div>";
 
+    // Reference Assets panel - what to upload to Higgsfield
+    if (sb.referenceAssets && sb.referenceAssets.length) {
+      html += '<div class="card" style="border-color:#a78bfa">';
+      html += '<div class="ll" style="margin-bottom:6px;color:#a78bfa">Reference Assets to Upload to Higgsfield</div>';
+      html += '<p class="hint" style="margin-top:0;margin-bottom:12px">Upload these once. Every scene\'s Seedance prompt will reference them by @slot for locked character + narrator voice.</p>';
+      for (var ra = 0; ra < sb.referenceAssets.length; ra++) {
+        var r = sb.referenceAssets[ra];
+        html += '<div class="char" style="border-color:#a78bfa">';
+        html += '<strong style="color:#a78bfa">' + escapeHtml(r.slot || "") + "</strong>";
+        if (r.type) html += ' <span class="tag" style="margin-left:6px">' + escapeHtml(r.type) + "</span>";
+        html += "<div style=\"margin-top:6px\"><strong>Purpose:</strong> " + escapeHtml(r.purpose || "") + "</div>";
+        if (r.howToCreate) {
+          html += '<div style="margin-top:4px"><strong>How to create:</strong> ' +
+            escapeHtml(r.howToCreate) + "</div>";
+        }
+        html += "</div>";
+      }
+      html += "</div>";
+    }
+
     var scenes = sb.scenes || [];
     for (var j = 0; j < scenes.length; j++) {
       var s = scenes[j];
@@ -812,15 +887,9 @@
       html += '<div class="cam">' + escapeHtml(s.cameraDirection || "") + "</div>";
       html += "</div>";
 
-      html += renderBlock("Start Frame - Image Prompt", s.startImagePrompt, "#60a5fa");
-      html += renderBlock("Veo 3.0 - Video Prompt", s.videoPrompt, "#a78bfa");
-      html += renderBlock("Narration", s.narration, "#f472b6");
-      html += renderBlock(
-        "End Frame - Image Prompt" +
-          (n < scenes.length ? " (= Scene " + (n + 1) + " start frame)" : ""),
-        s.endImagePrompt,
-        "#34d399"
-      );
+      html += renderBlock("Opening Image Prompt (generate this image first)", s.startImagePrompt, "#60a5fa");
+      html += renderBlock("Seedance 2.0 Prompt (paste into Higgsfield)", s.seedancePrompt, "#a78bfa");
+      html += renderBlock("Narration (spoken words only)", s.narration, "#f472b6");
       html += "</div>";
     }
 
@@ -1130,11 +1199,21 @@
     lines.push("LOGLINE: " + (sb.logline || ""));
     lines.push("NARRATOR: " + (sb.narratorPersona || ""));
     lines.push("VISUAL STYLE: " + (sb.visualStyle || ""));
+    lines.push("ASPECT RATIO: " + (sb.aspectRatio || ""));
     if (sb.characterBible && sb.characterBible.length) {
       lines.push("");
       lines.push("CHARACTER BIBLE:");
       sb.characterBible.forEach(function (c) {
         lines.push("- " + (c.name || "?") + ": " + (c.description || ""));
+      });
+    }
+    if (sb.referenceAssets && sb.referenceAssets.length) {
+      lines.push("");
+      lines.push("REFERENCE ASSETS (upload to Higgsfield once):");
+      sb.referenceAssets.forEach(function (r) {
+        lines.push("- " + (r.slot || "") + " [" + (r.type || "") + "]: " +
+          (r.purpose || ""));
+        if (r.howToCreate) lines.push("    How to create: " + r.howToCreate);
       });
     }
     lines.push("");
@@ -1145,18 +1224,16 @@
     lines.push("");
     (sb.scenes || []).forEach(function (s) {
       lines.push("===== SCENE " + s.sceneNumber + " (" + s.duration + "s) =====");
-      lines.push("START IMAGE PROMPT:");
-      lines.push(s.startImagePrompt || "");
-      lines.push("");
-      lines.push("VEO 3.0 VIDEO PROMPT:");
-      lines.push(s.videoPrompt || "");
-      lines.push("");
       lines.push("CAMERA: " + (s.cameraDirection || ""));
       lines.push("");
-      lines.push("NARRATION: " + (s.narration || ""));
+      lines.push("OPENING IMAGE PROMPT:");
+      lines.push(s.startImagePrompt || "");
       lines.push("");
-      lines.push("END IMAGE PROMPT (= next scene's start frame):");
-      lines.push(s.endImagePrompt || "");
+      lines.push("SEEDANCE 2.0 PROMPT:");
+      lines.push(s.seedancePrompt || "");
+      lines.push("");
+      lines.push("NARRATION (spoken words only):");
+      lines.push(s.narration || "");
       lines.push("");
     });
     return lines.join("\n");
@@ -1178,8 +1255,8 @@
     setLoading(
       true,
       format === "video"
-        ? "Storyboarding a full 5-minute video. This can take up to 60 seconds..."
-        : "Storyboarding your Short..."
+        ? "Storyboarding a 5-minute video for Seedance 2.0. This can take up to 60 seconds..."
+        : "Storyboarding your Short for Seedance 2.0..."
     );
 
     try {
@@ -1188,8 +1265,9 @@
       var maxTokens = format === "short" ? 4000 : 16000;
       var text = await callClaude(apiKey, sys, usr, maxTokens);
       var sb = extractJson(text);
-      sb = enforceChain(sb);
+      sb = renumberScenes(sb);
       if (!sb.format) sb.format = format;
+      if (!sb.aspectRatio) sb.aspectRatio = format === "short" ? "9:16" : "16:9";
       if (!sb.totalDurationSeconds) sb.totalDurationSeconds = format === "short" ? 30 : 300;
       if (!Array.isArray(sb.scenes)) sb.scenes = [];
       render(sb);
