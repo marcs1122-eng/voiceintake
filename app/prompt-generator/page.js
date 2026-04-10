@@ -55,11 +55,20 @@ export default function PromptGeneratorPage() {
     lines.push("LOGLINE: " + (sb.logline || ""));
     lines.push("NARRATOR: " + (sb.narratorPersona || ""));
     lines.push("VISUAL STYLE: " + (sb.visualStyle || ""));
+    lines.push("ASPECT RATIO: " + (sb.aspectRatio || ""));
     if (sb.characterBible && sb.characterBible.length) {
       lines.push("");
       lines.push("CHARACTER BIBLE:");
       sb.characterBible.forEach(function (c) {
         lines.push("- " + (c.name || "?") + ": " + (c.description || ""));
+      });
+    }
+    if (sb.referenceAssets && sb.referenceAssets.length) {
+      lines.push("");
+      lines.push("REFERENCE ASSETS (upload to Higgsfield once):");
+      sb.referenceAssets.forEach(function (r) {
+        lines.push("- " + (r.slot || "") + " [" + (r.type || "") + "]: " + (r.purpose || ""));
+        if (r.howToCreate) lines.push("    How to create: " + r.howToCreate);
       });
     }
     lines.push("");
@@ -73,18 +82,16 @@ export default function PromptGeneratorPage() {
     lines.push("");
     (sb.scenes || []).forEach(function (s) {
       lines.push("===== SCENE " + s.sceneNumber + " (" + s.duration + "s) =====");
-      lines.push("START IMAGE PROMPT:");
-      lines.push(s.startImagePrompt || "");
-      lines.push("");
-      lines.push("VEO 3.0 VIDEO PROMPT:");
-      lines.push(s.videoPrompt || "");
-      lines.push("");
       lines.push("CAMERA: " + (s.cameraDirection || ""));
       lines.push("");
-      lines.push("NARRATION: " + (s.narration || ""));
+      lines.push("OPENING IMAGE PROMPT:");
+      lines.push(s.startImagePrompt || "");
       lines.push("");
-      lines.push("END IMAGE PROMPT (= next scene's start frame):");
-      lines.push(s.endImagePrompt || "");
+      lines.push("SEEDANCE 2.0 PROMPT:");
+      lines.push(s.seedancePrompt || "");
+      lines.push("");
+      lines.push("NARRATION (spoken words only):");
+      lines.push(s.narration || "");
       lines.push("");
     });
     copy(lines.join("\n"), "all");
@@ -127,10 +134,10 @@ export default function PromptGeneratorPage() {
             AI Image + Video Prompt Generator
           </h1>
           <p style={{ margin: "8px 0 0", color: "#94a3b8", fontSize: 15 }}>
-            Type a theme. Get a full storyboard with image prompts, Veo 3.0
-            video prompts, and narration for a YouTube Short or a 5-minute
-            video. Each scene's end frame is the next scene's start frame, so
-            your clips chain into one seamless video.
+            Type a theme. Get a full storyboard tuned for <strong>Seedance 2.0</strong>
+            {" "}(Higgsfield) — one opening image prompt + one Seedance prompt with
+            embedded voiceover per scene, plus @image1/@audio1 reference locks
+            for a consistent character and narrator across every clip.
           </p>
         </header>
 
@@ -192,7 +199,7 @@ export default function PromptGeneratorPage() {
                 setFormat("short");
               }}
               title="YouTube Short"
-              sub="2 clips · 30s total"
+              sub="2 clips · 15s each · 9:16"
             />
             <FormatPill
               active={format === "video"}
@@ -200,7 +207,7 @@ export default function PromptGeneratorPage() {
                 setFormat("video");
               }}
               title="YouTube Video"
-              sub="~38 clips · 5 min total"
+              sub="20 clips · 15s each · 16:9"
             />
             <div style={{ flex: 1 }} />
             <button
@@ -349,6 +356,83 @@ export default function PromptGeneratorPage() {
               )}
             </div>
 
+            {/* Reference Assets panel */}
+            {sb.referenceAssets && sb.referenceAssets.length > 0 && (
+              <div
+                style={{
+                  background: "#111827",
+                  border: "1px solid #a78bfa",
+                  borderRadius: 14,
+                  padding: 22,
+                  marginBottom: 20,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: "#a78bfa",
+                    textTransform: "uppercase",
+                    letterSpacing: 1,
+                    fontWeight: 700,
+                    marginBottom: 6,
+                  }}
+                >
+                  Reference Assets to Upload to Higgsfield
+                </div>
+                <p style={{ margin: "0 0 14px", color: "#94a3b8", fontSize: 13, lineHeight: 1.5 }}>
+                  Upload these once. Every scene&apos;s Seedance prompt will reference
+                  them by @slot so the character and narrator voice stay identical
+                  across every clip.
+                </p>
+                <div style={{ display: "grid", gap: 10 }}>
+                  {sb.referenceAssets.map(function (r, i) {
+                    return (
+                      <div
+                        key={i}
+                        style={{
+                          background: "#0b1120",
+                          border: "1px solid #a78bfa",
+                          borderRadius: 10,
+                          padding: "12px 14px",
+                          color: "#cbd5e1",
+                          fontSize: 14,
+                          lineHeight: 1.55,
+                        }}
+                      >
+                        <div>
+                          <strong style={{ color: "#a78bfa", fontSize: 15 }}>
+                            {r.slot}
+                          </strong>
+                          {r.type && (
+                            <span
+                              style={{
+                                marginLeft: 8,
+                                fontSize: 11,
+                                padding: "2px 8px",
+                                background: "#1e293b",
+                                borderRadius: 999,
+                                color: "#94a3b8",
+                              }}
+                            >
+                              {r.type}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ marginTop: 6 }}>
+                          <strong>Purpose:</strong> {r.purpose}
+                        </div>
+                        {r.howToCreate && (
+                          <div style={{ marginTop: 4 }}>
+                            <strong>How to create:</strong> {r.howToCreate}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Scene list */}
             {(sb.scenes || []).map(function (s, idx) {
               return (
@@ -493,7 +577,7 @@ function SceneCard(props) {
       </div>
 
       <PromptBlock
-        label="Start Frame — Image Prompt"
+        label="Opening Image Prompt (generate this image first)"
         value={s.startImagePrompt}
         tag={"img-start-" + n}
         copied={copied}
@@ -501,28 +585,20 @@ function SceneCard(props) {
         accent="#60a5fa"
       />
       <PromptBlock
-        label="Veo 3.0 — Video Prompt"
-        value={s.videoPrompt}
-        tag={"video-" + n}
+        label="Seedance 2.0 Prompt (paste into Higgsfield)"
+        value={s.seedancePrompt}
+        tag={"seedance-" + n}
         copied={copied}
         onCopy={onCopy}
         accent="#a78bfa"
       />
       <PromptBlock
-        label="Narration"
+        label="Narration (spoken words only)"
         value={s.narration}
         tag={"narr-" + n}
         copied={copied}
         onCopy={onCopy}
         accent="#f472b6"
-      />
-      <PromptBlock
-        label={"End Frame — Image Prompt" + (n < props.total ? " (= Scene " + (n + 1) + " start frame)" : "")}
-        value={s.endImagePrompt}
-        tag={"img-end-" + n}
-        copied={copied}
-        onCopy={onCopy}
-        accent="#34d399"
       />
     </div>
   );
