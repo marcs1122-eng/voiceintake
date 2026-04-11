@@ -11,9 +11,10 @@ higgsfield:
   api_key: "hf-XXXX"
   base_url: "https://api.higgsfield.ai/v1"
 
-kling:
-  api_key: "kling-XXXX"
-  base_url: "https://api.kling.ai/v1"
+cinema_studio:
+  api_key: "cs-XXXX"
+  base_url: "https://api.cinemastudio.ai/v3"
+  model: "seedance-2.0"
 
 atlas:
   api_key: "atlas-XXXX"

@@ -1,4 +1,4 @@
-"""Video Composer Agent - composes final video using Kling AI."""
+"""Video Composer Agent - composes final video using Cinema Studio 3.0 (Seedance 2.0)."""
 
 from __future__ import annotations
 
@@ -10,11 +10,10 @@ from core.state import VideoProject
 
 
 class VideoComposerAgent(BaseAgent):
-    """Composes video from generated images and audio using Kling AI.
+    """Composes video from generated images and audio using Cinema Studio 3.0.
 
-    Takes generated scene images, animates them into video clips using Kling's
-    image-to-video capability, then assembles the final video with narration
-    and background music.
+    Uses the Seedance 2.0 model to animate scene images into video clips,
+    then assembles the final video with narration and background music via ffmpeg.
     """
 
     name = "video_composer"
@@ -29,15 +28,17 @@ class VideoComposerAgent(BaseAgent):
         content_cfg = channel_cfg.get("content", {}).get("long_form", {})
         target_duration = content_cfg.get("target_duration", 600)
 
-        kling_key = api_keys.get("kling", {}).get("api_key", "")
-        kling_url = api_keys.get("kling", {}).get("base_url", "https://api.kling.ai/v1")
+        cs_cfg = api_keys.get("cinema_studio", {})
+        cs_key = cs_cfg.get("api_key", "")
+        cs_url = cs_cfg.get("base_url", "https://api.cinemastudio.ai/v3")
+        cs_model = cs_cfg.get("model", "seedance-2.0")
 
         self.logger.info(
-            f"Composing video from {len(project.generated_images)} images "
-            f"(target: {target_duration}s)"
+            f"Composing video with Cinema Studio 3.0 ({cs_model}) from "
+            f"{len(project.generated_images)} images (target: {target_duration}s)"
         )
 
-        # Step 1: Generate video clips from each image using Kling
+        # Step 1: Generate video clips from each image using Seedance 2.0
         video_clips = []
         clip_duration = max(3, target_duration // max(len(project.generated_images), 1))
 
@@ -46,8 +47,9 @@ class VideoComposerAgent(BaseAgent):
                 image_path=image_path,
                 index=i,
                 duration=clip_duration,
-                api_key=kling_key,
-                base_url=kling_url,
+                api_key=cs_key,
+                base_url=cs_url,
+                model=cs_model,
                 project=project,
                 file_manager=file_manager,
             )
@@ -68,6 +70,7 @@ class VideoComposerAgent(BaseAgent):
 
         project.log_agent_action(self.name, "video_composed", {
             "clips_count": len(video_clips),
+            "model": cs_model,
             "final_video": final_path,
         })
 
@@ -86,10 +89,11 @@ class VideoComposerAgent(BaseAgent):
         duration: int,
         api_key: str,
         base_url: str,
+        model: str,
         project: VideoProject,
         file_manager,
     ) -> str | None:
-        """Convert a single image to a video clip using Kling AI."""
+        """Convert a single image to a video clip using Cinema Studio 3.0 / Seedance 2.0."""
         from utils.api_client import APIClient
         import base64
         from pathlib import Path
@@ -106,28 +110,32 @@ class VideoComposerAgent(BaseAgent):
             if index < len(project.script_sections):
                 pacing = project.script_sections[index].get("pacing", "normal")
 
+            # Seedance 2.0 motion presets
             motion_map = {
-                "fast": "dynamic",
-                "slow": "gentle_pan",
-                "dramatic": "zoom_in",
-                "normal": "subtle_motion",
+                "fast":     "dynamic_action",
+                "slow":     "gentle_pan",
+                "dramatic": "cinematic_zoom",
+                "normal":   "subtle_parallax",
             }
 
-            # Kling image-to-video API
-            result = await client.post("/videos/image-to-video", json={
-                "image": b64_image,
-                "duration": min(duration, 10),  # Kling max per clip
-                "motion_type": motion_map.get(pacing, "subtle_motion"),
-                "quality": "high",
+            # Cinema Studio 3.0 image-to-video API
+            result = await client.post("/videos/generate", json={
+                "model": model,                         # "seedance-2.0"
+                "source_image": b64_image,
+                "duration_seconds": min(duration, 10),
+                "motion_preset": motion_map.get(pacing, "subtle_parallax"),
+                "quality": "cinematic",
+                "resolution": "1920x1080",
                 "output_format": "mp4",
+                "fps": 24,
             })
 
             video_url = result.get("video", {}).get("url", "")
             if not video_url:
                 # Poll for completion if async
-                task_id = result.get("task_id", "")
+                task_id = result.get("task_id") or result.get("job_id", "")
                 if task_id:
-                    video_url = await self._poll_kling_task(client, task_id)
+                    video_url = await self._poll_task(client, task_id)
 
             if not video_url:
                 self.logger.warning(f"No video generated for clip {index}")
@@ -153,19 +161,19 @@ class VideoComposerAgent(BaseAgent):
         finally:
             await client.close()
 
-    async def _poll_kling_task(self, client, task_id: str, timeout: int = 300) -> str:
-        """Poll a Kling async task until completion."""
+    async def _poll_task(self, client, task_id: str, timeout: int = 300) -> str:
+        """Poll a Cinema Studio async task until completion."""
         import time
         start = time.time()
         while time.time() - start < timeout:
             result = await client.get(f"/videos/tasks/{task_id}")
             status = result.get("status", "")
-            if status == "completed":
-                return result.get("video", {}).get("url", "")
-            elif status == "failed":
-                raise RuntimeError(f"Kling task {task_id} failed: {result}")
+            if status in ("completed", "succeeded"):
+                return result.get("video", {}).get("url", "") or result.get("output_url", "")
+            elif status in ("failed", "error"):
+                raise RuntimeError(f"Cinema Studio task {task_id} failed: {result}")
             await asyncio.sleep(5)
-        raise TimeoutError(f"Kling task {task_id} timed out after {timeout}s")
+        raise TimeoutError(f"Cinema Studio task {task_id} timed out after {timeout}s")
 
     async def _assemble_video(
         self,
@@ -175,7 +183,6 @@ class VideoComposerAgent(BaseAgent):
         file_manager,
     ) -> str:
         """Assemble clips into final video using ffmpeg."""
-        import subprocess
         from pathlib import Path
 
         project_dir = file_manager.project_dir(project.channel_id, project.project_id)

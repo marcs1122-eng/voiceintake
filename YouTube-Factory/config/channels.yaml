@@ -196,7 +196,7 @@ defaults:
   api_providers:
     llm: "anthropic"
     image: "higgsfield"
-    video: "kling"
+    video: "cinema_studio"     # Cinema Studio 3.0 with Seedance 2.0 model
     voice: "atlas"
 
   rate_limits:
