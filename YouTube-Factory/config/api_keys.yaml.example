@@ -8,16 +8,17 @@ anthropic:
   model: "claude-sonnet-4-6"
 
 higgsfield:
+  # Higgsfield provides everything visual and audio:
+  #  - Images (Nano Banana Pro)
+  #  - Voices (Atlas + many others)
+  #  - Video (Cinema Studio 3.0 with Seedance 2.0)
   api_key: "hf-XXXX"
   base_url: "https://api.higgsfield.ai/v1"
+  video_model: "seedance-2.0"
 
-cinema_studio:
-  api_key: "cs-XXXX"
-  base_url: "https://api.cinemastudio.ai/v3"
-  model: "seedance-2.0"
-
-# Note: Voice narration (including Atlas) is provided by Higgsfield above.
-# No separate Atlas API key is needed.
+# Note: Voice narration (including Atlas) and video generation
+# (Cinema Studio 3.0 / Seedance 2.0) are both handled by Higgsfield above.
+# No separate API keys are needed for voice or video.
 
 youtube:
   client_id: "XXXX.apps.googleusercontent.com"

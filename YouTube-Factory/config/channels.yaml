@@ -198,8 +198,8 @@ defaults:
 
   api_providers:
     llm: "anthropic"
-    image: "higgsfield"            # Nano Banana Pro
-    video: "cinema_studio"         # Cinema Studio 3.0 with Seedance 2.0
+    image: "higgsfield"            # Nano Banana Pro (via Higgsfield)
+    video: "higgsfield"            # Cinema Studio 3.0 / Seedance 2.0 (via Higgsfield)
     voice: "higgsfield"            # Higgsfield Voices (includes Atlas + many others)
 
   rate_limits:

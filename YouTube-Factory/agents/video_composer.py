@@ -1,4 +1,4 @@
-"""Video Composer Agent - composes final video using Cinema Studio 3.0 (Seedance 2.0)."""
+"""Video Composer Agent - composes final video using Higgsfield Cinema Studio 3.0 (Seedance 2.0)."""
 
 from __future__ import annotations
 
@@ -10,10 +10,12 @@ from core.state import VideoProject
 
 
 class VideoComposerAgent(BaseAgent):
-    """Composes video from generated images and audio using Cinema Studio 3.0.
+    """Composes video from generated images and audio using Higgsfield's
+    Cinema Studio 3.0 (Seedance 2.0 model).
 
-    Uses the Seedance 2.0 model to animate scene images into video clips,
-    then assembles the final video with narration and background music via ffmpeg.
+    Cinema Studio 3.0 is a module inside Higgsfield - not a separate service.
+    It animates scene images into video clips via the Seedance 2.0 model,
+    then we assemble the final video with narration and music via ffmpeg.
     """
 
     name = "video_composer"
@@ -28,13 +30,14 @@ class VideoComposerAgent(BaseAgent):
         content_cfg = channel_cfg.get("content", {}).get("long_form", {})
         target_duration = content_cfg.get("target_duration", 600)
 
-        cs_cfg = api_keys.get("cinema_studio", {})
-        cs_key = cs_cfg.get("api_key", "")
-        cs_url = cs_cfg.get("base_url", "https://api.cinemastudio.ai/v3")
-        cs_model = cs_cfg.get("model", "seedance-2.0")
+        # Cinema Studio 3.0 lives under Higgsfield - same API key
+        higgsfield_cfg = api_keys.get("higgsfield", {})
+        hf_key = higgsfield_cfg.get("api_key", "")
+        hf_url = higgsfield_cfg.get("base_url", "https://api.higgsfield.ai/v1")
+        cs_model = higgsfield_cfg.get("video_model", "seedance-2.0")
 
         self.logger.info(
-            f"Composing video with Cinema Studio 3.0 ({cs_model}) from "
+            f"Composing video with Higgsfield Cinema Studio 3.0 ({cs_model}) from "
             f"{len(project.generated_images)} images (target: {target_duration}s)"
         )
 
@@ -47,8 +50,8 @@ class VideoComposerAgent(BaseAgent):
                 image_path=image_path,
                 index=i,
                 duration=clip_duration,
-                api_key=cs_key,
-                base_url=cs_url,
+                api_key=hf_key,
+                base_url=hf_url,
                 model=cs_model,
                 project=project,
                 file_manager=file_manager,
@@ -93,7 +96,7 @@ class VideoComposerAgent(BaseAgent):
         project: VideoProject,
         file_manager,
     ) -> str | None:
-        """Convert a single image to a video clip using Cinema Studio 3.0 / Seedance 2.0."""
+        """Convert a single image to a video clip using Higgsfield Cinema Studio 3.0."""
         from utils.api_client import APIClient
         import base64
         from pathlib import Path
@@ -118,8 +121,8 @@ class VideoComposerAgent(BaseAgent):
                 "normal":   "subtle_parallax",
             }
 
-            # Cinema Studio 3.0 image-to-video API
-            result = await client.post("/videos/generate", json={
+            # Higgsfield Cinema Studio 3.0 image-to-video endpoint
+            result = await client.post("/cinema-studio/generate", json={
                 "model": model,                         # "seedance-2.0"
                 "source_image": b64_image,
                 "duration_seconds": min(duration, 10),
@@ -130,7 +133,7 @@ class VideoComposerAgent(BaseAgent):
                 "fps": 24,
             })
 
-            video_url = result.get("video", {}).get("url", "")
+            video_url = result.get("video", {}).get("url", "") or result.get("output_url", "")
             if not video_url:
                 # Poll for completion if async
                 task_id = result.get("task_id") or result.get("job_id", "")
@@ -162,11 +165,11 @@ class VideoComposerAgent(BaseAgent):
             await client.close()
 
     async def _poll_task(self, client, task_id: str, timeout: int = 300) -> str:
-        """Poll a Cinema Studio async task until completion."""
+        """Poll a Higgsfield async task until completion."""
         import time
         start = time.time()
         while time.time() - start < timeout:
-            result = await client.get(f"/videos/tasks/{task_id}")
+            result = await client.get(f"/cinema-studio/tasks/{task_id}")
             status = result.get("status", "")
             if status in ("completed", "succeeded"):
                 return result.get("video", {}).get("url", "") or result.get("output_url", "")
@@ -224,3 +227,4 @@ class VideoComposerAgent(BaseAgent):
             raise RuntimeError(f"ffmpeg failed: {stderr.decode()}")
 
         return str(output_path)
+
