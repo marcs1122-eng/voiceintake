@@ -8,8 +8,8 @@ httpx>=0.27.0
 # LLM
 anthropic>=0.40.0
 
-# Image/Video Generation (Higgsfield SDK)
-higgsfield>=0.1.0
+# Image/Video Generation - Higgsfield uses REST API via httpx (no official pypi SDK yet)
+# We call Higgsfield endpoints directly through our APIClient in utils/api_client.py
 
 # YouTube Upload
 google-api-python-client>=2.100.0
