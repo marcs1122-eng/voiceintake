@@ -1,4 +1,4 @@
-"""Voice Narrator Agent - generates narration audio using Atlas TTS."""
+"""Voice Narrator Agent - generates narration via Higgsfield Voices (Atlas + others)."""
 
 from __future__ import annotations
 
@@ -9,10 +9,15 @@ from core.state import VideoProject
 
 
 class VoiceNarratorAgent(BaseAgent):
-    """Generates voice narration using Atlas AI text-to-speech.
+    """Generates voice narration using Higgsfield's Voices endpoint.
 
-    Takes the full script narration text and converts it to audio using the
-    channel-specific voice configuration (voice ID, speed, pitch, style).
+    Higgsfield hosts many voices including Atlas, and each channel picks
+    its own voice via the `voice.voice_id` field in channels.yaml.
+
+    Examples:
+        Dark Verdict  -> voice_id: "atlas_noir_male_01"     (Atlas voice)
+        Trailer Trash -> voice_id: "epic_trailer_male_01"   (different voice)
+        New channel   -> any Higgsfield voice ID you prefer
     """
 
     name = "voice_narrator"
@@ -26,24 +31,27 @@ class VoiceNarratorAgent(BaseAgent):
         channel_cfg = self.get_channel_config(project)
         voice_cfg = channel_cfg.get("voice", {})
 
-        voice_id = voice_cfg.get("voice_id", "atlas_default")
+        # Voice config is per-channel; the channel decides which voice to use.
+        voice_id = voice_cfg.get("voice_id", "atlas_noir_male_01")
         speed = voice_cfg.get("speed", 1.0)
         pitch = voice_cfg.get("pitch", 0)
         style = voice_cfg.get("style", "narrative")
 
-        atlas_key = api_keys.get("atlas", {}).get("api_key", "")
-        atlas_url = api_keys.get("atlas", {}).get("base_url", "https://api.atlas.ai/v1")
+        # Higgsfield hosts the voice endpoint (Atlas is one of many voices).
+        higgsfield_cfg = api_keys.get("higgsfield", {})
+        hf_key = higgsfield_cfg.get("api_key", "")
+        hf_url = higgsfield_cfg.get("base_url", "https://api.higgsfield.ai/v1")
 
         self.logger.info(
-            f"Generating narration with voice '{voice_id}' "
-            f"(speed={speed}, pitch={pitch}, style={style})"
+            f"Generating narration via Higgsfield Voices "
+            f"(voice='{voice_id}', speed={speed}, pitch={pitch}, style={style})"
         )
 
         from utils.api_client import APIClient
-        client = APIClient(base_url=atlas_url, api_key=atlas_key, timeout=300.0)
+        client = APIClient(base_url=hf_url, api_key=hf_key, timeout=300.0)
 
         try:
-            # Split script into chunks if too long (Atlas may have limits)
+            # Split script into chunks if too long
             chunks = self._split_script(project.script, max_chars=4000)
             audio_chunks: list[bytes] = []
 
@@ -51,7 +59,8 @@ class VoiceNarratorAgent(BaseAgent):
                 self.logger.debug(f"Narrating chunk {i + 1}/{len(chunks)} ({len(chunk)} chars)")
 
                 async def _generate_audio(text=chunk):
-                    result = await client.post("/speech/generate", json={
+                    # Higgsfield Voices endpoint
+                    result = await client.post("/voices/generate", json={
                         "text": text,
                         "voice_id": voice_id,
                         "speed": speed,
@@ -61,9 +70,9 @@ class VoiceNarratorAgent(BaseAgent):
                         "quality": "high",
                         "sample_rate": 44100,
                     })
-                    audio_url = result.get("audio_url", "")
+                    audio_url = result.get("audio_url") or result.get("url", "")
                     if not audio_url:
-                        raise RuntimeError(f"No audio URL in Atlas response: {result}")
+                        raise RuntimeError(f"No audio URL in Higgsfield response: {result}")
 
                     import httpx
                     async with httpx.AsyncClient(timeout=120.0) as http:
@@ -95,6 +104,7 @@ class VoiceNarratorAgent(BaseAgent):
 
         project.log_agent_action(self.name, "narration_generated", {
             "voice_id": voice_id,
+            "provider": "higgsfield",
             "chunks": len(chunks),
             "audio_file": narration_path,
         })

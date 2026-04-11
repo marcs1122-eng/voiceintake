@@ -16,9 +16,8 @@ cinema_studio:
   base_url: "https://api.cinemastudio.ai/v3"
   model: "seedance-2.0"
 
-atlas:
-  api_key: "atlas-XXXX"
-  base_url: "https://api.atlas.ai/v1"
+# Note: Voice narration (including Atlas) is provided by Higgsfield above.
+# No separate Atlas API key is needed.
 
 youtube:
   client_id: "XXXX.apps.googleusercontent.com"

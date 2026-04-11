@@ -29,8 +29,9 @@ channels:
         style: "cliffhanger_teaser"
 
     voice:
-      provider: "atlas"
-      voice_id: "atlas_noir_male_01"
+      # Higgsfield-hosted voice. Dark Verdict uses an Atlas voice.
+      provider: "higgsfield"
+      voice_id: "atlas_noir_male_01"   # Atlas voice under Higgsfield
       speed: 0.95
       pitch: -2
       style: "documentary"
@@ -117,8 +118,10 @@ channels:
         style: "best_moment_clip"
 
     voice:
-      provider: "atlas"
-      voice_id: "atlas_epic_male_02"
+      # Higgsfield-hosted voice. Trailer Trash uses an epic trailer voice
+      # (NOT Atlas - every channel can pick any Higgsfield voice).
+      provider: "higgsfield"
+      voice_id: "epic_trailer_male_01"  # Different voice for this channel
       speed: 1.05
       pitch: 0
       style: "movie_trailer_announcer"
@@ -195,9 +198,9 @@ defaults:
 
   api_providers:
     llm: "anthropic"
-    image: "higgsfield"
-    video: "cinema_studio"     # Cinema Studio 3.0 with Seedance 2.0 model
-    voice: "atlas"
+    image: "higgsfield"            # Nano Banana Pro
+    video: "cinema_studio"         # Cinema Studio 3.0 with Seedance 2.0
+    voice: "higgsfield"            # Higgsfield Voices (includes Atlas + many others)
 
   rate_limits:
     youtube_uploads_per_day: 10

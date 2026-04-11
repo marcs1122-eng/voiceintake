@@ -27,8 +27,10 @@
 #       style: "highlight_clip"
 #
 #   voice:
-#     provider: "atlas"
-#     voice_id: "atlas_default"
+#     # All voices come from Higgsfield (Atlas is one of many).
+#     # Pick whichever voice_id matches your channel's personality.
+#     provider: "higgsfield"
+#     voice_id: "your_chosen_voice_id"   # e.g. atlas_noir_male_01, epic_trailer_male_01, friendly_female_01
 #     speed: 1.0
 #     pitch: 0
 #     style: "conversational"
