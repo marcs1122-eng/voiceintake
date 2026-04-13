@@ -9,12 +9,16 @@ export async function GET(request) {
   }
 
   try {
-    const voiceId = process.env.ELEVENLABS_VOICE_ID || 'kSDv9EbJ41pJUICMEOOu';
+    const voiceId = process.env.ELEVENLABS_VOICE_ID;
+    if (!voiceId) {
+      console.error('ELEVENLABS_VOICE_ID env var is not set!');
+      return new NextResponse('Voice configuration error', { status: 500 });
+    }
 
     const response = await fetch(
       // optimize_streaming_latency=3: max latency reduction without disabling text normalizer
-      // (level 4 disables normalizer — risks mispronouncing medical terms / numbers)
-      // output_format=mp3_22050_32: smallest valid MP3 — phone audio is 8kHz anyway,
+      // (level 4 disables normalizer \u2014 risks mispronouncing medical terms / numbers)
+      // output_format=mp3_22050_32: smallest valid MP3 \u2014 phone audio is 8kHz anyway,
       // 22050Hz is plenty, 32kbps cuts file size ~75% vs default (faster Twilio download)
       `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream?optimize_streaming_latency=3&output_format=mp3_22050_32`,
       {
@@ -33,7 +37,7 @@ export async function GET(request) {
             style: 0,                 // KEY FIX: style > 0 adds a render pass that causes
                                       // both ~100-200ms extra latency AND audio artifacts
                                       // (this was the source of the "background noise")
-            use_speaker_boost: false, // Saves ~20-50ms — audible difference is negligible on phone
+            use_speaker_boost: false, // Saves ~20-50ms \u2014 audible difference is negligible on phone
           },
         }),
       }
