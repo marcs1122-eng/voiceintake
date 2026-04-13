@@ -3,9 +3,11 @@ import { kv } from '@vercel/kv';
 export const runtime = 'nodejs';
 
 function checkAuth(request) {
+  const password = process.env.ADMIN_PASSWORD;
+  if (!password) return false; // Fail closed if ADMIN_PASSWORD not set
   const auth = request.headers.get('Authorization') || '';
   const token = auth.replace('Bearer ', '').trim();
-  return token === process.env.ADMIN_PASSWORD;
+  return token.length > 0 && token === password;
 }
 
 export async function GET(request) {
