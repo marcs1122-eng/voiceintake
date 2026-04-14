@@ -93,13 +93,27 @@ async function generatePDF(data) {
     sectionTitle('CHIEF COMPLAINT & PAIN HISTORY');
     field('Chief Complaint', data.chief_complaint);
     field('Cause of Pain', data.cause_of_pain, true);
+    field('Date of Injury', data.date_of_injury, true);
+    field('Prior Pain', data.prior_pain, true);
     field('Pain Location', data.pain_location);
+    field('Radiation', data.pain_radiation, true);
     field('Pain Description', data.pain_description);
     field('Pain Severity (0-10)', data.pain_severity, true);
     field('What Makes It Worse', data.pain_worse);
     field('What Makes It Better', data.pain_better);
     field('Treatments Tried', data.treatments);
     spacer();
+
+    if (data.visit_type === 'follow_up') {
+      sectionTitle('LAST VISIT UPDATES');
+      field('Had Procedure', data.had_procedure, true);
+      field('Procedure Relief', data.procedure_relief, true);
+      field('New Medications', data.new_medications);
+      field('New Conditions', data.new_conditions);
+      field('Family Changes', data.family_changes);
+      field('Social Changes', data.social_changes);
+      spacer();
+    }
 
     sectionTitle('MEDICATIONS & ALLERGIES');
     field('Current Medications', data.medications);
@@ -110,7 +124,15 @@ async function generatePDF(data) {
       sectionTitle('MEDICAL HISTORY');
       field('Medical Conditions', data.medical_conditions);
       field('Past Surgeries', data.surgeries);
+      field('Past Hospitalizations', data.hospitalizations);
       field('Family History', data.family_history);
+      spacer();
+
+      sectionTitle('SOCIAL HISTORY');
+      field('Smoking', data.smoking, true);
+      field('Alcohol', data.alcohol, true);
+      field('Disability', data.disability, true);
+      field('Pregnant', data.pregnant, true);
       spacer();
     }
 
@@ -120,10 +142,18 @@ async function generatePDF(data) {
     field('Neurological', data.ros_neurological);
     field('Musculoskeletal', data.ros_musculoskeletal);
     field('Psychiatric', data.ros_psychiatric);
+    field('Other', data.ros_other);
     spacer();
 
     sectionTitle('CONSENT');
     field('Verbal Consent', data.verbal_consent || 'Yes \u2014 recorded on call');
+    y += 16;
+
+    doc.rect(50, y, pageWidth, 1).fill('#CCCCCC');
+    y += 8;
+    doc.fillColor(GRAY).fontSize(8).font('Helvetica')
+      .text('This intake was collected via VoiceIntake AI. Verbal consent was obtained and the call was recorded. This document is for clinical use only.', 55, y, { width: pageWidth });
+
     doc.end();
   });
 }
