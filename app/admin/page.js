@@ -81,7 +81,7 @@ export default function AdminDashboard() {
       <div style={{ minHeight: '100vh', background: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'system-ui, sans-serif' }}>
         <div style={{ background: '#1e293b', borderRadius: 12, padding: 40, width: 360, boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}>
           <div style={{ textAlign: 'center', marginBottom: 32 }}>
-            <div style={{ fontSize: 32, marginBottom: 8 }}>\u{1F3E5}</div>
+            <div style={{ fontSize: 32, marginBottom: 8 }}>🏥</div>
             <h1 style={{ color: '#f1f5f9', fontSize: 22, fontWeight: 700, margin: 0 }}>VoiceIntake Admin</h1>
             <p style={{ color: '#94a3b8', fontSize: 14, marginTop: 8 }}>Global Neuro &amp; Spine Institute</p>
           </div>
@@ -103,7 +103,7 @@ export default function AdminDashboard() {
             disabled={loading || !password}
             style={{ width: '100%', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 8, padding: '12px 0', fontSize: 15, fontWeight: 600, cursor: 'pointer' }}
           >
-            {loading ? 'Signing in\u2026' : 'Sign In'}
+            {loading ? 'Signing in…' : 'Sign In'}
           </button>
         </div>
       </div>
@@ -115,7 +115,7 @@ export default function AdminDashboard() {
       {/* Header */}
       <div style={{ background: '#1e293b', borderBottom: '1px solid #334155', padding: '16px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span style={{ fontSize: 24 }}>\u{1F3E5}</span>
+          <span style={{ fontSize: 24 }}>🏥</span>
           <div>
             <h1 style={{ color: '#f1f5f9', fontSize: 18, fontWeight: 700, margin: 0 }}>VoiceIntake Admin</h1>
             <p style={{ color: '#64748b', fontSize: 12, margin: 0 }}>Global Neuro &amp; Spine Institute</p>
@@ -148,7 +148,7 @@ export default function AdminDashboard() {
       <div style={{ padding: '16px 24px', display: 'flex', gap: 12 }}>
         <input
           type="text"
-          placeholder="Search by name or complaint\u2026"
+          placeholder="Search by name or complaint…"
           value={search}
           onChange={e => setSearch(e.target.value)}
           style={{ flex: 1, background: '#1e293b', border: '1px solid #334155', borderRadius: 8, padding: '10px 14px', color: '#f1f5f9', fontSize: 14, outline: 'none' }}
@@ -204,7 +204,7 @@ export default function AdminDashboard() {
                     {i.visitType === 'follow_up' ? 'Follow-Up' : 'New'}
                   </span>
                   <div style={{ color: '#64748b', fontSize: 11, marginTop: 4 }}>
-                    {i.completedAt ? new Date(i.completedAt).toLocaleString() : '\u2014'}
+                    {i.completedAt ? new Date(i.completedAt).toLocaleString() : '—'}
                   </div>
                 </div>
               </div>
@@ -222,13 +222,13 @@ export default function AdminDashboard() {
                   onClick={() => downloadPDF(selected)}
                   style={{ background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
                 >
-                  \u{1F4C4} Download PDF
+                  📄 Download PDF
                 </button>
                 <button
                   onClick={() => setSelected(null)}
                   style={{ background: 'transparent', border: '1px solid #334155', color: '#94a3b8', borderRadius: 6, padding: '8px 14px', cursor: 'pointer', fontSize: 13 }}
                 >
-                  \u2715
+                  ✕
                 </button>
               </div>
             </div>
@@ -236,29 +236,29 @@ export default function AdminDashboard() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               {[
                 { label: 'Visit Type', value: selected.visitType === 'follow_up' ? 'Follow-Up' : 'New Patient' },
-                { label: 'Completed', value: selected.completedAt ? new Date(selected.completedAt).toLocaleString() : '\u2014' },
-                { label: 'Date of Birth', value: selected.intakeData?.dob || '\u2014' },
-                { label: 'Height / Weight', value: selected.intakeData?.height && selected.intakeData?.weight ? `${selected.intakeData.height} / ${selected.intakeData.weight}` : '\u2014' },
-                { label: 'Chief Complaint', value: selected.chiefComplaint || selected.intakeData?.chief_complaint || '\u2014' },
-                { label: 'Cause of Pain', value: selected.intakeData?.cause_of_pain || '\u2014' },
-                { label: 'Pain Location', value: selected.intakeData?.pain_location || '\u2014' },
-                { label: 'Pain Severity', value: selected.intakeData?.pain_severity || '\u2014' },
-                { label: 'Pain Description', value: selected.intakeData?.pain_description || '\u2014' },
-                { label: 'Radiating', value: selected.intakeData?.pain_radiation || '\u2014' },
-                { label: 'Pain Worse', value: selected.intakeData?.pain_worse || '\u2014' },
-                { label: 'Pain Better', value: selected.intakeData?.pain_better || '\u2014' },
-                { label: 'Treatments Tried', value: selected.intakeData?.treatments || '\u2014' },
-                { label: 'Medications', value: selected.intakeData?.medications || '\u2014' },
-                { label: 'Allergies', value: selected.intakeData?.allergies || '\u2014' },
-                { label: 'Medical Conditions', value: selected.intakeData?.medical_conditions || '\u2014' },
-                { label: 'Prior Surgeries', value: selected.intakeData?.surgeries || '\u2014' },
-                { label: 'Hospitalizations', value: selected.intakeData?.hospitalizations || '\u2014' },
-                { label: 'Family History', value: selected.intakeData?.family_history || '\u2014' },
-                { label: 'Marital Status', value: selected.intakeData?.marital_status || '\u2014' },
-                { label: 'Employment', value: selected.intakeData?.employment || '\u2014' },
-                { label: 'Smoking', value: selected.intakeData?.smoking || '\u2014' },
-                { label: 'Alcohol', value: selected.intakeData?.alcohol || '\u2014' },
-                { label: 'Disability Claim', value: selected.intakeData?.disability || '\u2014' },
+                { label: 'Completed', value: selected.completedAt ? new Date(selected.completedAt).toLocaleString() : '—' },
+                { label: 'Date of Birth', value: selected.intakeData?.dob || '—' },
+                { label: 'Height / Weight', value: selected.intakeData?.height && selected.intakeData?.weight ? `${selected.intakeData.height} / ${selected.intakeData.weight}` : '—' },
+                { label: 'Chief Complaint', value: selected.chiefComplaint || selected.intakeData?.chief_complaint || '—' },
+                { label: 'Cause of Pain', value: selected.intakeData?.cause_of_pain || '—' },
+                { label: 'Pain Location', value: selected.intakeData?.pain_location || '—' },
+                { label: 'Pain Severity', value: selected.intakeData?.pain_severity || '—' },
+                { label: 'Pain Description', value: selected.intakeData?.pain_description || '—' },
+                { label: 'Radiating', value: selected.intakeData?.pain_radiation || '—' },
+                { label: 'Pain Worse', value: selected.intakeData?.pain_worse || '—' },
+                { label: 'Pain Better', value: selected.intakeData?.pain_better || '—' },
+                { label: 'Treatments Tried', value: selected.intakeData?.treatments || '—' },
+                { label: 'Medications', value: selected.intakeData?.medications || '—' },
+                { label: 'Allergies', value: selected.intakeData?.allergies || '—' },
+                { label: 'Medical Conditions', value: selected.intakeData?.medical_conditions || '—' },
+                { label: 'Prior Surgeries', value: selected.intakeData?.surgeries || '—' },
+                { label: 'Hospitalizations', value: selected.intakeData?.hospitalizations || '—' },
+                { label: 'Family History', value: selected.intakeData?.family_history || '—' },
+                { label: 'Marital Status', value: selected.intakeData?.marital_status || '—' },
+                { label: 'Employment', value: selected.intakeData?.employment || '—' },
+                { label: 'Smoking', value: selected.intakeData?.smoking || '—' },
+                { label: 'Alcohol', value: selected.intakeData?.alcohol || '—' },
+                { label: 'Disability Claim', value: selected.intakeData?.disability || '—' },
               ].map(field => (
                 <div key={field.label} style={{ background: '#0f172a', borderRadius: 8, padding: 12 }}>
                   <div style={{ color: '#64748b', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{field.label}</div>
