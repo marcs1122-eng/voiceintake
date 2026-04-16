@@ -38,7 +38,7 @@ new: [
   { s:"Review of Systems",q:"How about your mood. Any anxiety, depression, or mood changes?",f:"ros_psych",t:"text" },
   { s:"Review of Systems",q:"Any other symptoms: vision, hearing, breathing, stomach, or skin?",f:"ros_other",t:"text" },
   { s:"Safety",q:"Is there any chance you could be pregnant?",f:"pregnant",t:"text" },
-  { s:"Consent",q:"Last step. By completing this intake you authorize Global Neuro and Spine Institute to release medical information to process your insurance claims. Do you understand and agree?",f:"consent",t:"yn" }
+  { s:"Consent",q:"Last step. By completing this intake you authorize your provider to release medical information to process your insurance claims. Do you understand and agree?",f:"consent",t:"yn" }
 ],
 followup: [
   { s:"Identification",q:"Welcome back! Can I get your full name?",f:"full_name",t:"text" },
@@ -222,7 +222,7 @@ export default function VoiceIntake() {
   const beginIntake = async (t) => {
     setType(t); setStep(0); stepRef.current = 0; setResp({}); respRef.current = {}; setChat([]); chatRef2.current = []; setInput(""); setScreen("intake");
     const f = FL[t];
-    const g = t === "new" ? "Hi there! Welcome to Global Neuro and Spine Institute. I will help you complete your intake. Just speak naturally, and if I get anything wrong, just let me know. Let us start with your full name, first and last please." : "Welcome back to Global Neuro and Spine Institute! Let me quickly update your information. Just speak naturally. Can I get your full name?";
+    const g = t === "new" ? "Hi there! Welcome. I will help you complete your intake. Just speak naturally, and if I get anything wrong, just let me know. Let us start with your full name, first and last please." : "Welcome back to ! Let me quickly update your information. Just speak naturally. Can I get your full name?";
     setChat([{ role: "ai", text: g, id: 1 }]); chatRef2.current = [{ role: "ai", text: g }];
     busyRef.current = true; setIsSpeaking(true); speakingRef.current = true;
     await speakEL(g);
@@ -245,7 +245,7 @@ export default function VoiceIntake() {
           <button onClick={()=>beginIntake("followup")} style={{padding:"16px 32px",fontSize:15,fontWeight:600,background:c.surf,color:c.txt,border:"1px solid "+c.border,borderRadius:12,cursor:"pointer"}}>Follow-Up Visit</button>
         </div>
         <div style={{marginTop:40,padding:"10px 18px",background:c.card,borderRadius:10,border:"1px solid "+c.border,display:"inline-block",fontSize:12}}>
-          <span style={{color:c.dim}}>Configured for</span><span style={{fontWeight:600,marginLeft:6}}>Global Neuro & Spine Institute</span>
+          <span style={{color:c.dim}}></span><span style={{fontWeight:600,marginLeft:6}}></span>
         </div>
       </div>
     </div>
@@ -299,7 +299,7 @@ export default function VoiceIntake() {
         <div style={{padding:"20px 16px",background:c.card,borderBottom:"1px solid "+c.border}}>
           <div style={{maxWidth:640,margin:"0 auto"}}>
             <div style={{fontSize:20,fontWeight:700}}>{type==="new"?"New Patient":"Follow-Up"} Intake Summary</div>
-            <div style={{fontSize:12,color:c.dim,marginTop:3}}>Global Neuro & Spine Institute</div>
+            <div style={{fontSize:12,color:c.dim,marginTop:3}}></div>
             {resp.full_name&&(<div style={{marginTop:14,padding:"10px 14px",background:c.priG,borderRadius:8}}><span style={{fontSize:12,color:c.dim}}>Patient:</span><span style={{fontSize:15,fontWeight:600,marginLeft:6}}>{resp.full_name}</span></div>)}
             <button onClick={()=>setScreen("home")} style={{marginTop:10,padding:"8px 16px",fontSize:12,background:c.surf,color:c.txt,border:"1px solid "+c.border,borderRadius:8,cursor:"pointer"}}>New Intake</button>
           </div>
