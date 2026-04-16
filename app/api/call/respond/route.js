@@ -63,11 +63,9 @@ const FOLLOWUP_QUESTIONS = [
   { field: 'ros_other', question: 'Anything else before your appointment?' },
 ];
 
-// FIX: Corrected progress messages \u2014 8 is ~21% done (not halfway), 17 is truly ~50%, 28 is ~82%
+// Only one subtle progress message near the end \u2014 no "you're doing great" spam
 const PROGRESS_MESSAGES = {
-  8:  "You're doing great!",
-  17: "You're about halfway through, doing great!",
-  28: "Almost done now, just a few more.",
+  28: "Almost done, just a few more.",
 };
 
 // Fire-and-forget PDF generation \u2014 never blocks the call response
@@ -76,6 +74,7 @@ function triggerPDF(session, callDuration) {
     role: h.role === 'assistant' ? 'agent' : 'user',
     message: h.content,
   }));
+
   fetch(`${BASE_URL}/api/call/complete`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -117,13 +116,13 @@ export async function POST(request) {
     session = await kv.get(`session:${callSid}`);
   } catch (kvErr) {
     console.error(`[${callSid}] KV read failed:`, kvErr.message);
-    // Don't create new session on KV error \u2014 retry once
     try {
       session = await kv.get(`session:${callSid}`);
     } catch (retryErr) {
       console.error(`[${callSid}] KV retry failed:`, retryErr.message);
     }
   }
+
   if (!session) {
     session = { flowType, callSid, questionIndex: 0, allResponses: {}, chatHistory: [] };
   }
@@ -153,11 +152,11 @@ export async function POST(request) {
     return respondWithAudio("Sorry about that \u2014 could you repeat your answer?", flowType);
   }
 
-  // Validate Claude response structure
   const action = claudeResponse.action || 'stay';
   const updates = claudeResponse.updates || {};
   const reply = claudeResponse.reply || currentQ?.question || "Could you say that again?";
   const skipTo = claudeResponse.skipTo || null;
+
   session.allResponses = { ...session.allResponses, ...updates };
   session.chatHistory = [
     ...session.chatHistory,
@@ -182,14 +181,14 @@ export async function POST(request) {
     return respondWithAudio(finalText, flowType, true);
   }
 
-  // Await KV save to prevent race conditions between consecutive requests
   await kv.set(`session:${callSid}`, session, { ex: 3600 }).catch(e => console.error(`[${callSid}] KV save failed:`, e.message));
 
   const progressMsg = PROGRESS_MESSAGES[session.questionIndex] || '';
   const fullReply = progressMsg ? `${reply} ${progressMsg}` : reply;
-  // Use longer speechTimeout when asking a spelling question
+
   const SPELL_FIELDS = ['name_spelling_first', 'name_spelling_last'];
   const isSpellMode = SPELL_FIELDS.includes(questions[session.questionIndex]?.field);
+
   return respondWithAudio(fullReply, flowType, false, isSpellMode);
 }
 
@@ -198,16 +197,18 @@ async function processWithClaude(speech, session, questions) {
   const nextQ = questions[session.questionIndex + 1];
   const firstName = (session.allResponses['full_name'] || '').split(' ')[0] || '';
 
-  const systemPrompt = `You are Sarah, a warm and caring intake assistant for Global Neuro and Spine Institute in Florida. You are on a phone call with a patient. Sound completely natural \u2014 like a real person, not a robot or a form. Think of how a great nurse talks to patients.
+  const systemPrompt = `You are Sarah, a warm and caring intake assistant for Global Neuro and Spine Institute in Florida.
+You are on a phone call with a patient. Sound completely natural \u2014 like a real person, not a robot or a form.
 
 VOICE RULES \u2014 critical, these are spoken aloud on a phone:
 1. 1-2 short sentences MAX per reply. Never longer.
 2. When advancing, briefly acknowledge then ask next question \u2014 in one reply.
 3. Never repeat a question already answered.
 4. Use contractions: "you're", "that's", "I'll", "let's" \u2014 sounds human.
-5. NO "Great!", "Certainly!", "Absolutely!", "I understand" \u2014 robotic and fake.
+5. NO "Great!", "Certainly!", "Absolutely!", "I understand", "You're doing great", "Perfect" \u2014 robotic and fake. Just move on naturally.
 6. ${firstName ? `Use ${firstName}'s name occasionally, not every time.` : 'Warm friendly tone.'}
 7. If patient asks something off-topic like office location or hours, answer in one brief sentence then return to the question.
+8. Keep acknowledgments minimal: "Got it.", "Okay.", "Mm-hm." then move to next question. Don't praise the patient for answering basic questions.
 
 MEDICAL UNDERSTANDING \u2014 interpret these patient phrasings correctly:
 - "water pill" = diuretic
@@ -226,7 +227,13 @@ SPECIAL FIELDS:
 - name_confirm_first: Patient confirms first name spelling. Yes/correct = advance. If they say no or correct it, update first_name_confirmed with the corrected spelling, stay on name_confirm_first, read corrected spelling back to re-confirm.
 - name_spelling_last: Patient spells their last name letter by letter. Same Twilio format \u2014 space-separated letters. Reconstruct and read back: "Got it \u2014 [LastName] spelled [S-L-O-B-A-S-K-Y]. Is that right?" Store as last_name_confirmed.
 - name_confirm_last: Patient confirms last name spelling. Yes = advance. No/correction = update last_name_confirmed, stay, re-confirm. When advancing, also store full_name_confirmed = first_name_confirmed + " " + last_name_confirmed.
-- dob: Accept any spoken format \u2014 "10 15 1980", "ten fifteen eighty", "October 15th 1980" all mean the same date. Store as MM/DD/YYYY. Never ask the patient to restate in a different format.
+- dob: Accept ANY spoken date format without asking for clarification. Examples:
+  "1/1/21" or "one one twenty one" = 01/01/2021
+  "January first twenty twenty one" = 01/01/2021
+  "10 15 80" or "ten fifteen eighty" = 10/15/1980
+  "3-5-99" = 03/05/1999
+  Two-digit years: 00-29 = 2000s, 30-99 = 1900s (e.g. "85" = 1985, "21" = 2021)
+  NEVER ask the patient to restate in a different format. NEVER ask for month, day, year separately. Just accept what they say and store as MM/DD/YYYY.
 
 CURRENT STATE:
 - Visit: ${session.flowType === 'followup' ? 'Follow-up' : 'New patient'}
@@ -243,7 +250,7 @@ Reply ONLY with valid JSON, no markdown, no backticks:
 
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 200,
+    max_tokens: 150,
     system: systemPrompt,
     messages: [
       ...session.chatHistory.slice(-6).map(h => ({ role: h.role, content: h.content })),
@@ -263,11 +270,12 @@ Reply ONLY with valid JSON, no markdown, no backticks:
 function respondWithAudio(text, flowType, isFinal = false, spellMode = false) {
   const audioUrl = `${BASE_URL}/api/audio?text=${encodeURIComponent(text)}`;
   const actionUrl = `${BASE_URL}/api/call/respond?flow=${flowType}`;
+
   // Spelling: 3s (patients pause between letters)
   // Normal: 2s (gives patients time to think on medical questions)
   const st = spellMode ? '3' : '2';
-  let twiml;
 
+  let twiml;
   if (isFinal) {
     twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -276,14 +284,10 @@ function respondWithAudio(text, flowType, isFinal = false, spellMode = false) {
   } else {
     twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-  <Gather input="speech" action="${actionUrl}" method="POST"
-    speechTimeout="${st}"
-    speechModel="phone_call" enhanced="true" language="en-US" timeout="10">
+  <Gather input="speech" action="${actionUrl}" method="POST" speechTimeout="${st}" speechModel="phone_call" enhanced="true" language="en-US" timeout="10">
     <Play>${audioUrl}</Play>
   </Gather>
-  <Gather input="speech" action="${actionUrl}" method="POST"
-    speechTimeout="${st}"
-    speechModel="phone_call" enhanced="true" language="en-US" timeout="10">
+  <Gather input="speech" action="${actionUrl}" method="POST" speechTimeout="${st}" speechModel="phone_call" enhanced="true" language="en-US" timeout="10">
     <Play>${BASE_URL}/api/audio?text=${encodeURIComponent("I didn't catch that. " + text)}</Play>
   </Gather>
   <Play>${BASE_URL}/api/audio?text=${encodeURIComponent("I'm having trouble hearing you. Please try calling back. Goodbye.")}</Play>
