@@ -49,6 +49,8 @@ export default function StockValuationPage() {
   var [loading, setLoading] = useState(false);
   var [error, setError] = useState(null);
   var [data, setData] = useState(null);
+  var [gex, setGex] = useState(null);
+  var [gexError, setGexError] = useState(null);
 
   async function runValuation(e) {
     if (e) e.preventDefault();
@@ -56,20 +58,44 @@ export default function StockValuationPage() {
     setLoading(true);
     setError(null);
     setData(null);
-    try {
-      var res = await fetch("/api/stock/valuation", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ticker: ticker.trim() }),
+    setGex(null);
+    setGexError(null);
+    var t = ticker.trim();
+
+    var valuationPromise = fetch("/api/stock/valuation", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticker: t }),
+    })
+      .then(function (r) {
+        return r.json().then(function (j) {
+          return { ok: r.ok, body: j };
+        });
+      })
+      .then(function (out) {
+        if (!out.ok) setError(out.body.error || "Valuation failed");
+        else setData(out.body);
+      })
+      .catch(function (err) {
+        setError(err.message || "Network error");
       });
-      var json = await res.json();
-      if (!res.ok) {
-        setError(json.error || "Valuation failed");
-      } else {
-        setData(json);
-      }
-    } catch (err) {
-      setError(err.message || "Network error");
+
+    var gexPromise = fetch("/api/stock/gex?ticker=" + encodeURIComponent(t))
+      .then(function (r) {
+        return r.json().then(function (j) {
+          return { ok: r.ok, body: j };
+        });
+      })
+      .then(function (out) {
+        if (!out.ok) setGexError(out.body.error || "GEX unavailable");
+        else setGex(out.body.gex);
+      })
+      .catch(function (err) {
+        setGexError(err.message || "Network error");
+      });
+
+    try {
+      await Promise.all([valuationPromise, gexPromise]);
     } finally {
       setLoading(false);
     }
@@ -329,6 +355,18 @@ export default function StockValuationPage() {
               </div>
             </Card>
 
+            {/* FlashAlpha gamma exposure */}
+            {(gex || gexError) && (
+              <Card title="Gamma Exposure (FlashAlpha)">
+                {gexError && (
+                  <div style={{ color: "#fca5a5", fontSize: 14 }}>
+                    {gexError}
+                  </div>
+                )}
+                {gex && <GexView gex={gex} currency={currency} />}
+              </Card>
+            )}
+
             {/* Key fundamentals */}
             <Card title="Key Fundamentals">
               <div
@@ -460,6 +498,106 @@ function Stat(props) {
       >
         {props.value}
       </div>
+    </div>
+  );
+}
+
+function prettyLabel(key) {
+  return key
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, function (c) {
+      return c.toUpperCase();
+    });
+}
+
+function GexView(props) {
+  var gex = props.gex || {};
+  var currency = props.currency || "USD";
+
+  // FlashAlpha returns a JSON object. We don't know the exact shape, so
+  // surface a few known fields first and render the rest as key/value.
+  var known = [
+    { key: "spot", label: "Spot", fmt: "money" },
+    { key: "gamma_flip", label: "Gamma Flip", fmt: "money" },
+    { key: "call_wall", label: "Call Wall", fmt: "money" },
+    { key: "put_wall", label: "Put Wall", fmt: "money" },
+    { key: "zero_gamma", label: "Zero Gamma", fmt: "money" },
+    { key: "total_gex", label: "Total GEX", fmt: "big" },
+    { key: "net_gex", label: "Net GEX", fmt: "big" },
+    { key: "as_of", label: "As Of", fmt: "raw" },
+    { key: "timestamp", label: "Timestamp", fmt: "raw" },
+  ];
+
+  function renderValue(v, fmt) {
+    if (v == null) return "—";
+    if (fmt === "money" && typeof v === "number") return fmtMoney(v, currency);
+    if (fmt === "big" && typeof v === "number") return fmtBig(v);
+    if (typeof v === "number") return fmtNum(v);
+    if (typeof v === "object") return JSON.stringify(v);
+    return String(v);
+  }
+
+  var seen = {};
+  var primary = [];
+  for (var i = 0; i < known.length; i++) {
+    var k = known[i].key;
+    if (gex[k] !== undefined && gex[k] !== null) {
+      primary.push({ label: known[i].label, value: renderValue(gex[k], known[i].fmt) });
+      seen[k] = true;
+    }
+  }
+
+  var extras = [];
+  Object.keys(gex).forEach(function (k) {
+    if (seen[k]) return;
+    var v = gex[k];
+    if (v == null) return;
+    if (typeof v === "object" && !Array.isArray(v)) return; // skip nested objects
+    extras.push({ label: prettyLabel(k), value: renderValue(v, typeof v === "number" ? "big" : "raw") });
+  });
+
+  return (
+    <div>
+      {primary.length > 0 && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+            gap: 14,
+            marginBottom: extras.length ? 16 : 0,
+          }}
+        >
+          {primary.map(function (p, i) {
+            return <Field key={i} label={p.label} value={p.value} />;
+          })}
+        </div>
+      )}
+      {extras.length > 0 && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+            gap: 14,
+          }}
+        >
+          {extras.map(function (p, i) {
+            return <Field key={i} label={p.label} value={p.value} />;
+          })}
+        </div>
+      )}
+      {primary.length === 0 && extras.length === 0 && (
+        <pre
+          style={{
+            margin: 0,
+            color: "#cbd5e1",
+            fontSize: 12,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+          }}
+        >
+          {JSON.stringify(gex, null, 2)}
+        </pre>
+      )}
     </div>
   );
 }
