@@ -214,8 +214,8 @@ export default function VoiceIntake() {
         timerRef.current = setTimeout(() => { if (pendingRef.current.trim() && !busyRef.current) { const s = pendingRef.current.trim(); pendingRef.current = ""; if (doSubmitRef.current) doSubmitRef.current(s); } }, 1800);
       } else setInterim(n);
     };
-    r.onerror = () => stopL();
-    r.onend = () => { setIsListening(false); setInterim(""); if (pendingRef.current.trim() && !busyRef.current) { clearTimeout(timerRef.current); const s = pendingRef.current.trim(); pendingRef.current = ""; setTimeout(() => { if (doSubmitRef.current) doSubmitRef.current(s); }, 100); } };
+    r.onerror = (e) => { console.warn('[SR] error:', e.error); if (recRef.current === r) { recRef.current = null; } stopL(); };
+    r.onend = () => { if (recRef.current !== r) return; recRef.current = null; setIsListening(false); setInterim(""); if (pendingRef.current.trim() && !busyRef.current) { clearTimeout(timerRef.current); const s = pendingRef.current.trim(); pendingRef.current = ""; setTimeout(() => { if (doSubmitRef.current) doSubmitRef.current(s); }, 100); } else if (!busyRef.current && !speakingRef.current && voiceOnRef.current) { setTimeout(() => { if (startLRef.current && !busyRef.current && !speakingRef.current && voiceOnRef.current) startLRef.current(); }, 300); } };
     recRef.current = r; r.start();
   }, [stopL]);
   useEffect(() => { startLRef.current = startL; }, [startL]);
