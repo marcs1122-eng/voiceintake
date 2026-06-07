@@ -1,0 +1,458 @@
+{
+  "name": "Tastytrade Day Trade Scanner",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Tastytrade Day Trade Scanner\n\nScans a configurable watchlist at market open and surfaces tickers worth day trading based on:\n- **Call walls / Put walls** — strike clusters with abnormally high open interest (key magnet / pin levels for mean reversion and liquidity-zone scalps)\n- **Volume expansion** — today's cumulative volume vs. average\n- **Trend direction** — gap and short-term moving average vs. prior close\n\n### Required credentials / env vars\nSet these as n8n environment variables (Settings → Variables) or inject via the Set Config node:\n- `TASTYTRADE_USERNAME`\n- `TASTYTRADE_PASSWORD`\n- `TASTYTRADE_BASE_URL` — production: `https://api.tastyworks.com`, sandbox: `https://api.cert.tastyworks.com`\n- (optional) `SLACK_WEBHOOK_URL` for alerts\n\n### Schedule\nCron `30 9 * * 1-5` in **America/New_York** = 9:30 ET, Mon–Fri.\nSet workflow timezone in Settings → Timezone.\n\n### Notes\n- tastytrade does not expose historical OHLC via REST; trend uses session open vs. prior-day mark (`/market-metrics`) and a synthetic short SMA built from /market-data snapshots over the first minutes of the session. For tighter trend signals, layer in a DXLink websocket node or external OHLC source (Polygon, IEX).\n- Real-time L1 quotes (last/volume/OI) come via DXLink WebSocket. The REST `/market-data/by-type` endpoint returns the latest cached snapshot which is good enough for a once-daily scan.",
+        "height": 540,
+        "width": 540
+      },
+      "id": "note-overview",
+      "name": "README",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-340, -360]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "30 9 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "trigger-schedule",
+      "name": "Schedule 9:30 ET (Mon-Fri)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 260]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "baseUrl",
+              "type": "string",
+              "value": "={{ $env.TASTYTRADE_BASE_URL || 'https://api.tastyworks.com' }}"
+            },
+            {
+              "id": "a2",
+              "name": "watchlist",
+              "type": "array",
+              "value": "=[\"SPY\",\"QQQ\",\"IWM\",\"AAPL\",\"TSLA\",\"NVDA\",\"AMD\",\"META\",\"MSFT\",\"AMZN\",\"GOOGL\",\"NFLX\",\"COIN\",\"AVGO\",\"SMCI\"]"
+            },
+            {
+              "id": "a3",
+              "name": "maxDTE",
+              "type": "number",
+              "value": "=7"
+            },
+            {
+              "id": "a4",
+              "name": "strikeBandPct",
+              "type": "number",
+              "value": "=0.07"
+            },
+            {
+              "id": "a5",
+              "name": "wallZScore",
+              "type": "number",
+              "value": "=1.5"
+            },
+            {
+              "id": "a6",
+              "name": "minVolumeRatio",
+              "type": "number",
+              "value": "=1.3"
+            },
+            {
+              "id": "a7",
+              "name": "minLiquidityRating",
+              "type": "number",
+              "value": "=2"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-config",
+      "name": "Set Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [460, 260]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.baseUrl }}/sessions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "User-Agent", "value": "n8n-tastytrade-scanner/1.0" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"login\": \"{{ $env.TASTYTRADE_USERNAME }}\",\n  \"password\": \"{{ $env.TASTYTRADE_PASSWORD }}\",\n  \"remember-me\": false\n}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": false,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "auth-login",
+      "name": "Authenticate (POST /sessions)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 260]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "t1",
+              "name": "sessionToken",
+              "type": "string",
+              "value": "={{ $json.data['session-token'] }}"
+            },
+            {
+              "id": "t2",
+              "name": "baseUrl",
+              "type": "string",
+              "value": "={{ $('Set Config').item.json.baseUrl }}"
+            },
+            {
+              "id": "t3",
+              "name": "watchlist",
+              "type": "array",
+              "value": "={{ $('Set Config').item.json.watchlist }}"
+            },
+            {
+              "id": "t4",
+              "name": "config",
+              "type": "object",
+              "value": "={{ $('Set Config').item.json }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "extract-token",
+      "name": "Extract Session Token",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [900, 260]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "watchlist",
+        "include": "allOtherFields",
+        "options": {}
+      },
+      "id": "split-symbols",
+      "name": "Split Watchlist",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [1120, 260]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {
+          "reset": false
+        }
+      },
+      "id": "loop-symbols",
+      "name": "Loop Per Symbol",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1340, 260]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.baseUrl }}/market-metrics",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{ $json.sessionToken }}" },
+            { "name": "Accept", "value": "application/json" }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "symbols", "value": "={{ ($json.watchlist || []).join(',') }}" }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": false,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "get-metrics",
+      "name": "Get Market Metrics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 140]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Extract Session Token').item.json.baseUrl }}/option-chains/{{ $json.watchlist }}/nested",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{ $('Extract Session Token').item.json.sessionToken }}" },
+            { "name": "Accept", "value": "application/json" }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": false,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "get-chain",
+      "name": "Get Option Chain (Nested)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1560, 380]
+    },
+    {
+      "parameters": {
+        "jsCode": "// === Pick near-term expirations and build the streamer-symbol list ===\n// Inputs: option chain (nested) from previous node\n// Output: { symbol, expirations: [...], streamerSymbols: [...] } per item\n\nconst cfg = $('Extract Session Token').first().json.config;\nconst maxDTE = cfg.maxDTE ?? 7;\nconst bandPct = cfg.strikeBandPct ?? 0.07;\n\nconst out = [];\nfor (const item of items) {\n  const data = item.json?.data;\n  if (!data || !data.items || !data.items.length) continue;\n  const root = data.items[0];\n  const underlying = root['underlying-symbol'];\n\n  // Underlying mark from market-metrics paired by index in next merge step;\n  // for now keep a placeholder — actual price merged downstream.\n  const expirations = (root.expirations || [])\n    .filter(e => {\n      const dte = Math.ceil((new Date(e['expiration-date']) - Date.now()) / 86400000);\n      return dte >= 0 && dte <= maxDTE;\n    })\n    .slice(0, 2); // 0DTE + next expiration\n\n  const streamerSymbols = [];\n  const strikeIndex = [];\n  for (const exp of expirations) {\n    for (const s of (exp.strikes || [])) {\n      if (s['call-streamer-symbol']) streamerSymbols.push(s['call-streamer-symbol']);\n      if (s['put-streamer-symbol']) streamerSymbols.push(s['put-streamer-symbol']);\n      strikeIndex.push({\n        expiration: exp['expiration-date'],\n        strike: parseFloat(s['strike-price']),\n        callStreamer: s['call-streamer-symbol'],\n        putStreamer: s['put-streamer-symbol'],\n        callSymbol: s.call,\n        putSymbol: s.put,\n      });\n    }\n  }\n\n  out.push({\n    json: {\n      symbol: underlying,\n      bandPct,\n      maxDTE,\n      expirations: expirations.map(e => e['expiration-date']),\n      strikeIndex,\n      streamerSymbols,\n    }\n  });\n}\nreturn out;\n"
+      },
+      "id": "code-chain-prep",
+      "name": "Pick Near-Term Strikes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 380]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $('Extract Session Token').item.json.baseUrl }}/market-data/by-type",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "={{ $('Extract Session Token').item.json.sessionToken }}" },
+            { "name": "Accept", "value": "application/json" }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "equity-option",
+              "value": "={{ $json.streamerSymbols.join(',') }}"
+            },
+            {
+              "name": "equity",
+              "value": "={{ $json.symbol }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": false,
+              "responseFormat": "json"
+            }
+          },
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 250
+            }
+          }
+        }
+      },
+      "id": "get-snapshot",
+      "name": "Get OI/Volume Snapshot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2000, 380]
+    },
+    {
+      "parameters": {
+        "jsCode": "// === Wall detection, volume filter, trend signal, scoring ===\n// Combines: snapshot quotes (this node's input), strikeIndex (from Pick Near-Term),\n// and market-metrics (looked up via $('Get Market Metrics')).\n\nconst cfg = $('Extract Session Token').first().json.config;\nconst zCutoff = cfg.wallZScore ?? 1.5;\nconst minVolRatio = cfg.minVolumeRatio ?? 1.3;\nconst bandPct = cfg.strikeBandPct ?? 0.07;\nconst minLiq = cfg.minLiquidityRating ?? 2;\n\n// Helper: standard deviation\nfunction std(arr) {\n  if (arr.length < 2) return 0;\n  const m = arr.reduce((a,b) => a+b, 0) / arr.length;\n  const v = arr.reduce((a,b) => a + (b-m)*(b-m), 0) / arr.length;\n  return Math.sqrt(v);\n}\n\n// Helper: clustering around a strike — sum OI within ±$0.50 to capture clusters\nfunction clusterOI(strikes, side, halfWidth = 0.5) {\n  return strikes.map(k => {\n    const cluster = strikes.filter(s => Math.abs(s.strike - k.strike) <= halfWidth);\n    const oi = cluster.reduce((a, s) => a + (s[side+'OI'] || 0), 0);\n    const vol = cluster.reduce((a, s) => a + (s[side+'Vol'] || 0), 0);\n    return { strike: k.strike, oi, vol };\n  });\n}\n\nconst metricsResp = $('Get Market Metrics').first().json;\nconst metricsArr = metricsResp?.data?.items || [];\n\nconst out = [];\nfor (const item of items) {\n  const prep = $('Pick Near-Term Strikes').itemMatching($itemIndex)?.json;\n  if (!prep) continue;\n  const symbol = prep.symbol;\n  const metrics = metricsArr.find(m => m.symbol === symbol) || {};\n\n  const snap = item.json?.data?.items || [];\n  const bySymbol = {};\n  for (const q of snap) bySymbol[q.symbol] = q;\n\n  // Underlying snapshot\n  const underlying = snap.find(q => q.symbol === symbol) || {};\n  const last = parseFloat(underlying.last || underlying.mark || underlying.close || metrics['tos-implied-volatility-index'] || 0) ||\n               parseFloat(metrics['close-price'] || 0);\n  const prevClose = parseFloat(underlying['prev-close'] || metrics['close-price'] || last);\n  const dayVolume = parseFloat(underlying.volume || 0);\n  const avgVolume = parseFloat(metrics['average-daily-volume'] || 0);\n\n  if (!last) continue;\n\n  // Map strike index to live OI/Vol\n  const lo = last * (1 - bandPct);\n  const hi = last * (1 + bandPct);\n  const strikes = [];\n  for (const k of prep.strikeIndex) {\n    if (k.strike < lo || k.strike > hi) continue;\n    const c = bySymbol[k.callStreamer] || {};\n    const p = bySymbol[k.putStreamer] || {};\n    strikes.push({\n      strike: k.strike,\n      expiration: k.expiration,\n      callOI: parseFloat(c['open-interest'] || 0),\n      callVol: parseFloat(c.volume || 0),\n      putOI: parseFloat(p['open-interest'] || 0),\n      putVol: parseFloat(p.volume || 0),\n    });\n  }\n  if (strikes.length < 3) continue;\n\n  // Cluster OI into walls\n  const callCluster = clusterOI(strikes, 'call');\n  const putCluster = clusterOI(strikes, 'put');\n  const callOIs = callCluster.map(c => c.oi);\n  const putOIs = putCluster.map(c => c.oi);\n  const callMean = callOIs.reduce((a,b)=>a+b,0)/callOIs.length || 0;\n  const putMean = putOIs.reduce((a,b)=>a+b,0)/putOIs.length || 0;\n  const callStd = std(callOIs);\n  const putStd = std(putOIs);\n\n  // Call wall = highest-OI cluster above price with z >= cutoff\n  const callWalls = callCluster\n    .filter(c => c.strike >= last && callStd > 0 && (c.oi - callMean)/callStd >= zCutoff)\n    .sort((a,b) => b.oi - a.oi);\n  const putWalls = putCluster\n    .filter(c => c.strike <= last && putStd > 0 && (c.oi - putMean)/putStd >= zCutoff)\n    .sort((a,b) => b.oi - a.oi);\n\n  const callWall = callWalls[0] || null;\n  const putWall = putWalls[0] || null;\n\n  // Volume expansion vs. average\n  const volumeRatio = avgVolume > 0 ? dayVolume / avgVolume : 0;\n\n  // Trend: gap + direction (open vs. prev close). Without intraday OHLC, use last vs prev close.\n  const changePct = prevClose ? ((last - prevClose) / prevClose) * 100 : 0;\n  let trend = 'flat';\n  if (changePct > 0.3) trend = 'up';\n  else if (changePct < -0.3) trend = 'down';\n\n  // Liquidity rating (tastytrade returns 0-4)\n  const liquidityRating = parseInt(metrics['liquidity-rating'] || 0, 10);\n\n  // Pass / fail the screen\n  const passVolume = volumeRatio >= minVolRatio;\n  const passLiquidity = liquidityRating >= minLiq;\n  const passWalls = !!(callWall || putWall);\n  const candidate = passVolume && passLiquidity && passWalls;\n\n  // Scalp/mean-reversion playbook\n  let setup = 'none';\n  if (callWall && putWall) {\n    const range = callWall.strike - putWall.strike;\n    const pos = range > 0 ? (last - putWall.strike) / range : 0.5;\n    if (pos > 0.75 && trend !== 'up') setup = 'mean-revert-from-call-wall';\n    else if (pos < 0.25 && trend !== 'down') setup = 'mean-revert-from-put-wall';\n    else setup = 'range-scalp';\n  } else if (callWall && trend === 'up') {\n    setup = 'magnet-to-call-wall';\n  } else if (putWall && trend === 'down') {\n    setup = 'magnet-to-put-wall';\n  }\n\n  // Composite score: walls strength + volume + trend alignment\n  const wallScore =\n    (callWall ? (callWall.oi - callMean)/(callStd||1) : 0) +\n    (putWall  ? (putWall.oi - putMean)/(putStd||1)   : 0);\n  const score = +(wallScore * 1.0 + volumeRatio * 1.5 + Math.abs(changePct) * 0.25).toFixed(2);\n\n  out.push({\n    json: {\n      symbol,\n      candidate,\n      score,\n      last,\n      prevClose,\n      changePct: +changePct.toFixed(2),\n      trend,\n      volumeRatio: +volumeRatio.toFixed(2),\n      dayVolume,\n      avgVolume,\n      liquidityRating,\n      ivRank: parseFloat(metrics['implied-volatility-index-rank'] || 0),\n      expirations: prep.expirations,\n      callWall,\n      putWall,\n      setup,\n      strikes,\n    }\n  });\n}\nreturn out;\n"
+      },
+      "id": "code-analyze",
+      "name": "Analyze Walls/Volume/Trend",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2220, 380]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.candidate }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-candidates",
+      "name": "Keep Candidates Only",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2440, 380]
+    },
+    {
+      "parameters": {},
+      "id": "loop-back",
+      "name": "Next Symbol",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [2660, 380]
+    },
+    {
+      "parameters": {
+        "jsCode": "// === Rank, format and produce the final report ===\nconst rows = items.map(i => i.json);\nrows.sort((a, b) => (b.score || 0) - (a.score || 0));\n\nconst now = new Date().toISOString();\nconst lines = rows.map(r => {\n  const cw = r.callWall ? `CW $${r.callWall.strike} (${r.callWall.oi.toLocaleString()} OI)` : 'CW —';\n  const pw = r.putWall  ? `PW $${r.putWall.strike} (${r.putWall.oi.toLocaleString()} OI)`  : 'PW —';\n  return `${r.symbol.padEnd(6)} $${r.last.toFixed(2).padStart(8)}  ${r.changePct>=0?'+':''}${r.changePct.toFixed(2)}%  vol ${r.volumeRatio}x  ${r.trend.padEnd(4)}  ${pw}  ${cw}  → ${r.setup} (score ${r.score})`;\n});\n\nconst report = [\n  `Tastytrade Day Trade Scanner — ${now}`,\n  `Candidates: ${rows.length}`,\n  '',\n  ...lines\n].join('\\n');\n\nreturn [{\n  json: {\n    generatedAt: now,\n    count: rows.length,\n    candidates: rows,\n    report,\n  }\n}];\n"
+      },
+      "id": "code-format",
+      "name": "Rank & Format Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2880, 260]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"text\": \"*Tastytrade Day Trade Scanner* — {{ $json.count }} candidate(s)\\n```\\n{{ $json.report }}\\n```\"\n}",
+        "options": {}
+      },
+      "id": "notify-slack",
+      "name": "Notify Slack (optional)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3100, 260],
+      "continueOnFail": true,
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "content": "### Wall detection logic\n\n`Analyze Walls/Volume/Trend` runs per symbol after fetching live OI/volume for every option within ±`strikeBandPct` of spot for the nearest two expirations (≤ `maxDTE`).\n\n1. **Cluster** open interest by strike: sum OI within ±$0.50 of each strike, so adjacent strikes with stacked OI register as one wall.\n2. **Score** each cluster's OI against the band's mean/std — clusters whose z-score ≥ `wallZScore` are walls.\n3. **Call walls** must sit **above** spot, **put walls** below — these are the asymmetric magnet/resistance levels gamma flows pin price to.\n4. **Volume filter** keeps symbols whose intraday volume ≥ `minVolumeRatio` × 20-day average (from `/market-metrics`).\n5. **Liquidity filter** uses tastytrade's `liquidity-rating` (0–4).\n6. **Trend** is gap direction (last vs. prev-close >0.3% / <-0.3%).\n7. **Setup** classifier picks a playbook: mean-revert-from-wall, range-scalp, or wall-magnet.\n\nTune the knobs in **Set Config** without touching code.",
+        "height": 460,
+        "width": 540,
+        "color": 4
+      },
+      "id": "note-logic",
+      "name": "Algo Notes",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [2220, -200]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule 9:30 ET (Mon-Fri)": {
+      "main": [[{ "node": "Set Config", "type": "main", "index": 0 }]]
+    },
+    "Set Config": {
+      "main": [[{ "node": "Authenticate (POST /sessions)", "type": "main", "index": 0 }]]
+    },
+    "Authenticate (POST /sessions)": {
+      "main": [[{ "node": "Extract Session Token", "type": "main", "index": 0 }]]
+    },
+    "Extract Session Token": {
+      "main": [[
+        { "node": "Get Market Metrics", "type": "main", "index": 0 },
+        { "node": "Split Watchlist", "type": "main", "index": 0 }
+      ]]
+    },
+    "Split Watchlist": {
+      "main": [[{ "node": "Loop Per Symbol", "type": "main", "index": 0 }]]
+    },
+    "Loop Per Symbol": {
+      "main": [
+        [{ "node": "Rank & Format Report", "type": "main", "index": 0 }],
+        [{ "node": "Get Option Chain (Nested)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Option Chain (Nested)": {
+      "main": [[{ "node": "Pick Near-Term Strikes", "type": "main", "index": 0 }]]
+    },
+    "Pick Near-Term Strikes": {
+      "main": [[{ "node": "Get OI/Volume Snapshot", "type": "main", "index": 0 }]]
+    },
+    "Get OI/Volume Snapshot": {
+      "main": [[{ "node": "Analyze Walls/Volume/Trend", "type": "main", "index": 0 }]]
+    },
+    "Analyze Walls/Volume/Trend": {
+      "main": [[{ "node": "Keep Candidates Only", "type": "main", "index": 0 }]]
+    },
+    "Keep Candidates Only": {
+      "main": [
+        [{ "node": "Next Symbol", "type": "main", "index": 0 }],
+        [{ "node": "Next Symbol", "type": "main", "index": 0 }]
+      ]
+    },
+    "Next Symbol": {
+      "main": [[{ "node": "Loop Per Symbol", "type": "main", "index": 0 }]]
+    },
+    "Rank & Format Report": {
+      "main": [[{ "node": "Notify Slack (optional)", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "America/New_York",
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "1",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": [
+    { "name": "tastytrade" },
+    { "name": "options" },
+    { "name": "day-trade" },
+    { "name": "scanner" }
+  ]
+}
