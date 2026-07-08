@@ -230,61 +230,144 @@ export default function VoiceIntake() {
     setTimeout(() => { if (startLRef.current) startLRef.current(); }, 100);
   };
   const handleSubmit = () => { if (!input.trim()) return; doSubmit(input.trim()); };
-  const c = { bg:"#070B14",card:"#0F1623",border:"#1A2438",pri:"#3B82F6",priG:"rgba(59,130,246,.12)",sec:"#10B981",txt:"#E8EDF5",mut:"#8896AB",dim:"#5A6A80",red:"#EF4444",acc:"#F59E0B",surf:"#162032",aiBg:"#0D1825",userBg:"#142847" };
+  const MicIcon = (props) => (
+    <svg width={props.size||20} height={props.size||20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+      <line x1="12" y1="19" x2="12" y2="23"/>
+      <line x1="8" y1="23" x2="16" y2="23"/>
+    </svg>
+  );
   if (screen === "home") return (
-    <div style={{minHeight:"100vh",background:c.bg,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:20,fontFamily:"system-ui,sans-serif",color:c.txt}}>
-      <div style={{textAlign:"center",maxWidth:520}}>
-        <div style={{width:72,height:72,borderRadius:18,background:"linear-gradient(135deg,#3B82F6,#10B981)",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 24px"}}>
-          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+    <div style={{minHeight:"100vh",position:"relative",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"48px 24px",overflow:"hidden"}}>
+      <div className="vi-bg" />
+      <div className="vi-grid" />
+      <div className="vi-fade-in" style={{position:"relative",zIndex:1,textAlign:"center",maxWidth:560}}>
+        <div style={{position:"relative",width:96,height:96,margin:"0 auto 32px"}}>
+          <div style={{position:"absolute",inset:-18,borderRadius:36,background:"radial-gradient(circle at 30% 25%, rgba(91,141,239,0.55), transparent 65%)",filter:"blur(22px)"}}/>
+          <div style={{position:"relative",width:96,height:96,borderRadius:26,background:"linear-gradient(135deg,#5B8DEF 0%,#3B82F6 50%,#10B981 100%)",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 22px 50px -20px rgba(91,141,239,0.7), inset 0 1px 0 rgba(255,255,255,0.3)"}}>
+            <MicIcon size={42} />
+          </div>
         </div>
-        <h1 style={{fontSize:42,fontWeight:700,margin:0}}>VoiceIntake</h1>
-        <p style={{fontSize:16,color:c.mut,margin:"8px 0 4px"}}>AI-Powered Patient Intake</p>
-        <p style={{fontSize:13,color:c.dim,margin:"0 0 36px",lineHeight:1.5}}>Complete your medical intake by having a natural conversation. Correct me anytime. No paperwork needed.</p>
+        <h1 className="vi-headline">VoiceIntake</h1>
+        <p style={{fontSize:17,color:"var(--mut)",margin:"16px 0 8px",fontWeight:500,letterSpacing:"-0.01em"}}>AI-Powered Patient Intake</p>
+        <p style={{fontSize:14,color:"var(--dim)",margin:"0 auto 40px",lineHeight:1.65,maxWidth:440}}>Complete your medical intake by having a natural conversation. Correct me anytime — no paperwork needed.</p>
         <div style={{display:"flex",gap:12,justifyContent:"center",flexWrap:"wrap"}}>
-          <button onClick={()=>beginIntake("new")} style={{padding:"16px 32px",fontSize:15,fontWeight:600,background:"linear-gradient(135deg,#3B82F6,#2563EB)",color:"#fff",border:"none",borderRadius:12,cursor:"pointer"}}>New Patient Intake</button>
-          <button onClick={()=>beginIntake("followup")} style={{padding:"16px 32px",fontSize:15,fontWeight:600,background:c.surf,color:c.txt,border:"1px solid "+c.border,borderRadius:12,cursor:"pointer"}}>Follow-Up Visit</button>
+          <button className="vi-btn-primary" onClick={()=>beginIntake("new")}>
+            <span style={{display:"inline-flex",alignItems:"center",gap:10}}>
+              <span style={{display:"inline-flex",width:18,height:18,alignItems:"center",justifyContent:"center"}}><MicIcon size={16}/></span>
+              New Patient Intake
+            </span>
+          </button>
+          <button className="vi-btn-secondary" onClick={()=>beginIntake("followup")}>Follow-Up Visit</button>
         </div>
-        <div style={{marginTop:40,padding:"10px 18px",background:c.card,borderRadius:10,border:"1px solid "+c.border,display:"inline-block",fontSize:12}}>
-          <span style={{color:c.dim}}></span><span style={{fontWeight:600,marginLeft:6}}></span>
+        <div style={{marginTop:44,display:"flex",justifyContent:"center",gap:10,flexWrap:"wrap"}}>
+          <span className="vi-chip"><span className="vi-chip-dot"/>HIPAA-aware</span>
+          <span className="vi-chip">~3 minutes</span>
+          <span className="vi-chip">Voice or text</span>
         </div>
       </div>
     </div>
   );
   if (screen === "intake") return (
-    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",background:c.bg,fontFamily:"system-ui,sans-serif",color:c.txt}}>
-      <div style={{padding:"10px 16px",background:c.card,borderBottom:"1px solid "+c.border,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",position:"relative"}}>
+      <div className="vi-bg" />
+      <header style={{position:"relative",zIndex:1,padding:"12px 18px",background:"rgba(11,16,32,0.72)",backdropFilter:"blur(12px)",borderBottom:"1px solid var(--border)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <button onClick={()=>{cancelSpeech();stopL();setScreen("home")}} style={{background:"none",border:"none",color:c.mut,cursor:"pointer",fontSize:20}}>&#8592;</button>
-          <div><div style={{fontSize:14,fontWeight:600}}>{type==="new"?"New Patient":"Follow-Up"} Intake</div><div style={{fontSize:10,color:c.dim}}>GNSI</div></div>
+          <button onClick={()=>{cancelSpeech();stopL();setScreen("home")}} className="vi-icon-btn" aria-label="Back">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <div>
+            <div style={{fontSize:14,fontWeight:600,letterSpacing:"-0.01em"}}>{type==="new"?"New Patient":"Follow-Up"} Intake</div>
+            <div style={{fontSize:11,color:"var(--dim)",marginTop:1}}>{cur ? cur.s : "Wrapping up"}</div>
+          </div>
         </div>
-        <div style={{display:"flex",alignItems:"center",gap:12}}>
-          <button onClick={()=>{const nv=!voiceOn;setVoiceOn(nv);voiceOnRef.current=nv;if(!nv){cancelSpeech();stopL()}}} style={{padding:"4px 10px",fontSize:11,borderRadius:6,border:"1px solid "+(voiceOn?c.pri:c.border),background:voiceOn?c.priG:"transparent",color:voiceOn?c.pri:c.dim,cursor:"pointer"}}>{voiceOn?"Sound On":"Sound Off"}</button>
-          <span style={{fontSize:12,color:c.dim}}>{Math.min(ai+1,flow.length)}/{flow.length}</span>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <button onClick={()=>{const nv=!voiceOn;setVoiceOn(nv);voiceOnRef.current=nv;if(!nv){cancelSpeech();stopL()}}} className={"vi-toggle "+(voiceOn?"vi-toggle-on":"vi-toggle-off")} aria-label="Toggle sound">
+            {voiceOn ? (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+            ) : (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg>
+            )}
+            {voiceOn?"Sound on":"Sound off"}
+          </button>
+          <span style={{fontSize:12,color:"var(--mut)",fontVariantNumeric:"tabular-nums"}}>{Math.min(ai+1,flow.length)} <span style={{color:"var(--dim)"}}>/ {flow.length}</span></span>
+        </div>
+      </header>
+      <div style={{position:"relative",zIndex:1,height:4,background:"rgba(255,255,255,0.04)"}}>
+        <div className="vi-progress" style={{width:prog+"%"}}/>
+      </div>
+      <div ref={chatRef} style={{flex:1,overflow:"auto",padding:"20px 16px",display:"flex",flexDirection:"column",gap:10,position:"relative",zIndex:1}}>
+        <div style={{maxWidth:720,margin:"0 auto",width:"100%",display:"flex",flexDirection:"column",gap:10}}>
+          {chat.map((m)=> m.role === "user" ? (
+            <div key={m.id} style={{display:"flex",justifyContent:"flex-end"}}>
+              <div className="vi-bubble-user" style={{maxWidth:"82%",padding:"11px 15px",fontSize:14.5,lineHeight:1.5,color:"#fff",background:"linear-gradient(135deg,#3B82F6,#2563EB)",borderRadius:"16px 16px 4px 16px",boxShadow:"0 6px 18px -10px rgba(59,130,246,0.7)"}}>{m.text}</div>
+            </div>
+          ) : (
+            <div key={m.id} style={{display:"flex",justifyContent:"flex-start",gap:10,alignItems:"flex-end"}}>
+              <div style={{width:28,height:28,borderRadius:10,background:"linear-gradient(135deg,#5B8DEF,#10B981)",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,boxShadow:"0 6px 18px -10px rgba(91,141,239,0.7)"}}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+              </div>
+              <div className="vi-bubble-ai" style={{maxWidth:"82%",padding:"11px 15px",fontSize:14.5,lineHeight:1.55,color:"var(--txt)",background:"linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015))",border:"1px solid var(--border)",borderRadius:"16px 16px 16px 4px"}}>{m.text}</div>
+            </div>
+          ))}
+          {isThinking && (
+            <div style={{display:"flex",justifyContent:"flex-start",gap:10,alignItems:"flex-end"}}>
+              <div style={{width:28,height:28,borderRadius:10,background:"linear-gradient(135deg,#5B8DEF,#10B981)",flexShrink:0}}/>
+              <div style={{padding:"12px 16px",borderRadius:"16px 16px 16px 4px",background:"rgba(255,255,255,0.03)",border:"1px solid var(--border)",color:"var(--mut)",display:"inline-flex",alignItems:"center",gap:6}}>
+                <span className="vi-dots"><span/><span/><span/></span>
+              </div>
+            </div>
+          )}
+          {isListening && (interim||input) && (
+            <div style={{display:"flex",justifyContent:"flex-end"}}>
+              <div style={{maxWidth:"82%",padding:"10px 14px",borderRadius:"16px 16px 4px 16px",background:"rgba(248,113,113,0.08)",border:"1px dashed rgba(248,113,113,0.35)",fontSize:14,color:"#FCA5A5",fontStyle:"italic"}}>{input}{interim && <span style={{opacity:0.55}}> {interim}</span>}</div>
+            </div>
+          )}
         </div>
       </div>
-      <div style={{height:3,background:c.surf}}><div style={{height:"100%",width:prog+"%",background:"linear-gradient(90deg,#3B82F6,#10B981)",transition:"width .5s"}}/></div>
-      {cur&&<div style={{padding:"6px 16px",fontSize:10,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:c.pri,background:c.priG}}>{cur.s}</div>}
-      <div ref={chatRef} style={{flex:1,overflow:"auto",padding:"12px 16px",display:"flex",flexDirection:"column",gap:8}}>
-        {chat.map((m)=>(<div key={m.id} style={{display:"flex",justifyContent:m.role==="user"?"flex-end":"flex-start"}}><div style={{maxWidth:"85%",padding:"10px 14px",fontSize:14,lineHeight:1.5,background:m.role==="user"?c.userBg:c.aiBg,border:"1px solid "+(m.role==="user"?"rgba(59,130,246,.15)":c.border),borderRadius:m.role==="user"?"14px 14px 4px 14px":"14px 14px 14px 4px"}}>{m.text}</div></div>))}
-        {isThinking&&(<div style={{display:"flex",justifyContent:"flex-start"}}><div style={{padding:"10px 14px",borderRadius:"14px 14px 14px 4px",background:c.aiBg,border:"1px solid "+c.border,fontSize:13,color:c.dim}}>Thinking...</div></div>)}
-        {isListening&&(interim||input)&&(<div style={{display:"flex",justifyContent:"flex-end"}}><div style={{padding:"8px 14px",borderRadius:14,background:"rgba(239,68,68,.08)",border:"1px solid rgba(239,68,68,.15)",fontSize:13,color:c.red,fontStyle:"italic"}}>{input}{interim&&<span style={{opacity:0.6}}> {interim}</span>}</div></div>)}
-      </div>
-      {isSpeaking&&<div style={{padding:"6px 16px",background:"rgba(59,130,246,.04)"}}><span style={{fontSize:11,color:c.pri}}>Speaking... tap mic to interrupt</span></div>}
-      {isListening&&!isSpeaking&&<div style={{padding:"6px 16px",background:"rgba(239,68,68,.04)"}}><span style={{fontSize:11,color:c.red}}>Listening... speak naturally</span></div>}
-      {cur&&(cur.t==="yn"||cur.t==="choice"||cur.t==="scale")&&(
-        <div style={{padding:"8px 16px",display:"flex",gap:6,flexWrap:"wrap",borderTop:"1px solid "+c.border,background:c.card}}>
-          {cur.t==="yn"&&["Yes","No"].map((o)=><button key={o} onClick={()=>doSubmit(o)} style={{padding:"9px 22px",borderRadius:8,border:"1px solid "+c.border,background:c.surf,color:c.txt,fontSize:13,cursor:"pointer"}}>{o}</button>)}
-          {cur.t==="choice"&&cur.o.map((o)=><button key={o} onClick={()=>doSubmit(o)} style={{padding:"9px 18px",borderRadius:8,border:"1px solid "+c.border,background:c.surf,color:c.txt,fontSize:13,cursor:"pointer"}}>{o}</button>)}
-          {cur.t==="scale"&&<div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{Array.from({length:11},(_,n)=><button key={n} onClick={()=>doSubmit(String(n))} style={{width:38,height:38,borderRadius:8,border:"1px solid "+c.border,background:n<=3?"rgba(16,185,129,.08)":n<=6?"rgba(245,158,11,.08)":"rgba(239,68,68,.08)",color:n<=3?c.sec:n<=6?c.acc:c.red,fontSize:14,fontWeight:600,cursor:"pointer"}}>{n}</button>)}</div>}
+      {(isSpeaking || (isListening && !isSpeaking)) && (
+        <div style={{position:"relative",zIndex:1,padding:"6px 16px",display:"flex",justifyContent:"center"}}>
+          <span className="vi-chip" style={{color:isSpeaking?"var(--pri)":"#FCA5A5",borderColor:isSpeaking?"rgba(91,141,239,0.3)":"rgba(248,113,113,0.3)",background:isSpeaking?"rgba(91,141,239,0.08)":"rgba(248,113,113,0.08)"}}>
+            <span className="vi-wave"><span/><span/><span/><span/><span/></span>
+            {isSpeaking ? "Speaking · tap mic to interrupt" : "Listening · speak naturally"}
+          </span>
         </div>
       )}
-      <div style={{padding:"10px 16px 16px",background:c.card,borderTop:"1px solid "+c.border}}>
-        <div style={{display:"flex",gap:8,alignItems:"center"}}>
-          <button onClick={()=>{if(isListening)stopL();else startL()}} style={{width:48,height:48,borderRadius:"50%",border:"none",background:isListening?"linear-gradient(135deg,#EF4444,#DC2626)":"linear-gradient(135deg,#3B82F6,#2563EB)",color:"#fff",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",opacity:isThinking?0.4:1}}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-          </button>
-          <input type="text" value={input} onChange={(e)=>setInput(e.target.value)} onKeyDown={(e)=>e.key==="Enter"&&handleSubmit()} placeholder={isListening?"Listening...":"Type or tap mic..."} style={{flex:1,padding:"12px 16px",fontSize:14,background:c.surf,color:c.txt,border:"1px solid "+c.border,borderRadius:12,outline:"none"}}/>
-          <button onClick={handleSubmit} style={{width:44,height:44,borderRadius:12,border:"none",background:input.trim()?"linear-gradient(135deg,#10B981,#059669)":c.surf,color:input.trim()?"#fff":c.dim,cursor:input.trim()?"pointer":"default",display:"flex",alignItems:"center",justifyContent:"center"}}>
+      {cur && (cur.t==="yn" || cur.t==="choice" || cur.t==="scale") && (
+        <div style={{position:"relative",zIndex:1,padding:"10px 16px",borderTop:"1px solid var(--border)",background:"rgba(11,16,32,0.5)",backdropFilter:"blur(8px)"}}>
+          <div style={{maxWidth:720,margin:"0 auto",display:"flex",gap:8,flexWrap:"wrap",justifyContent:cur.t==="scale"?"center":"flex-start"}}>
+            {cur.t==="yn" && ["Yes","No"].map((o)=>(<button key={o} className="vi-quick" onClick={()=>doSubmit(o)} style={{minWidth:96}}>{o}</button>))}
+            {cur.t==="choice" && cur.o.map((o)=>(<button key={o} className="vi-quick" onClick={()=>doSubmit(o)}>{o}</button>))}
+            {cur.t==="scale" && Array.from({length:11},(_,n)=>(
+              <button key={n} className="vi-scale" onClick={()=>doSubmit(String(n))} style={{
+                border:"1px solid "+(n<=3?"rgba(16,185,129,0.4)":n<=6?"rgba(245,158,11,0.4)":"rgba(248,113,113,0.4)"),
+                background:n<=3?"rgba(16,185,129,0.10)":n<=6?"rgba(245,158,11,0.10)":"rgba(248,113,113,0.10)",
+                color:n<=3?"var(--sec)":n<=6?"var(--acc)":"var(--red)"
+              }}>{n}</button>
+            ))}
+          </div>
+        </div>
+      )}
+      <div style={{position:"relative",zIndex:1,padding:"12px 16px 18px",borderTop:"1px solid var(--border)",background:"rgba(11,16,32,0.72)",backdropFilter:"blur(12px)"}}>
+        <div style={{maxWidth:720,margin:"0 auto",display:"flex",gap:10,alignItems:"center"}}>
+          <div style={{position:"relative",width:52,height:52,flexShrink:0}}>
+            {isListening && <span className="vi-pulse-ring" style={{position:"absolute",inset:0,borderRadius:"50%",border:"2px solid rgba(248,113,113,0.6)"}}/>}
+            <button onClick={()=>{if(isListening)stopL();else startL()}} disabled={isThinking}
+              className={isListening?"vi-listening-mic":(isSpeaking?"vi-speaking-mic":"")}
+              style={{position:"relative",width:52,height:52,borderRadius:"50%",border:"none",cursor:isThinking?"default":"pointer",color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",opacity:isThinking?0.4:1,
+                background:isListening?"linear-gradient(135deg,#F87171,#DC2626)":"linear-gradient(135deg,#5B8DEF,#2563EB)",
+                boxShadow:isListening?"0 10px 30px -10px rgba(239,68,68,0.6)":"0 10px 30px -10px rgba(59,130,246,0.6)"}}
+              aria-label={isListening?"Stop listening":"Start listening"}>
+              <MicIcon size={20} />
+            </button>
+          </div>
+          <input type="text" value={input} onChange={(e)=>setInput(e.target.value)} onKeyDown={(e)=>e.key==="Enter"&&handleSubmit()} placeholder={isListening?"Listening...":"Type or tap the mic..."} className="vi-input"/>
+          <button onClick={handleSubmit} disabled={!input.trim()} aria-label="Send"
+            style={{width:48,height:48,borderRadius:14,border:"none",flexShrink:0,cursor:input.trim()?"pointer":"default",display:"flex",alignItems:"center",justifyContent:"center",transition:"transform 0.15s ease, filter 0.15s ease",
+              background:input.trim()?"linear-gradient(135deg,#10B981,#059669)":"rgba(255,255,255,0.04)",
+              color:input.trim()?"#fff":"var(--dim)",
+              boxShadow:input.trim()?"0 10px 24px -12px rgba(16,185,129,0.7)":"none"}}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
           </button>
         </div>
@@ -295,18 +378,54 @@ export default function VoiceIntake() {
     const g = {};
     flow.forEach((s) => { if (resp[s.f]) { if (!g[s.s]) g[s.s] = []; g[s.s].push({ f: s.f, a: resp[s.f] }); } });
     return (
-      <div style={{minHeight:"100vh",background:c.bg,fontFamily:"system-ui,sans-serif",color:c.txt}}>
-        <div style={{padding:"20px 16px",background:c.card,borderBottom:"1px solid "+c.border}}>
-          <div style={{maxWidth:640,margin:"0 auto"}}>
-            <div style={{fontSize:20,fontWeight:700}}>{type==="new"?"New Patient":"Follow-Up"} Intake Summary</div>
-            <div style={{fontSize:12,color:c.dim,marginTop:3}}></div>
-            {resp.full_name&&(<div style={{marginTop:14,padding:"10px 14px",background:c.priG,borderRadius:8}}><span style={{fontSize:12,color:c.dim}}>Patient:</span><span style={{fontSize:15,fontWeight:600,marginLeft:6}}>{resp.full_name}</span></div>)}
-            <button onClick={()=>setScreen("home")} style={{marginTop:10,padding:"8px 16px",fontSize:12,background:c.surf,color:c.txt,border:"1px solid "+c.border,borderRadius:8,cursor:"pointer"}}>New Intake</button>
+      <div style={{minHeight:"100vh",position:"relative"}}>
+        <div className="vi-bg" />
+        <div style={{position:"relative",zIndex:1,padding:"28px 16px 22px",borderBottom:"1px solid var(--border)",background:"rgba(11,16,32,0.72)",backdropFilter:"blur(10px)"}}>
+          <div style={{maxWidth:680,margin:"0 auto"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+              <div style={{width:6,height:24,borderRadius:3,background:"linear-gradient(180deg,#5B8DEF,#10B981)"}}/>
+              <div style={{fontSize:11,fontWeight:700,letterSpacing:"0.14em",textTransform:"uppercase",color:"var(--mut)"}}>Intake Summary</div>
+            </div>
+            <div style={{fontSize:26,fontWeight:700,letterSpacing:"-0.02em"}}>{type==="new"?"New Patient":"Follow-Up"} Visit</div>
+            {resp.full_name && (
+              <div className="vi-card" style={{marginTop:16,padding:"12px 16px",display:"flex",alignItems:"center",gap:12}}>
+                <div style={{width:36,height:36,borderRadius:12,background:"linear-gradient(135deg,#5B8DEF,#10B981)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:700,color:"#fff",flexShrink:0}}>
+                  {(resp.full_name||"").trim().split(/\s+/).map(w=>w[0]).filter(Boolean).slice(0,2).join("").toUpperCase()}
+                </div>
+                <div>
+                  <div style={{fontSize:11,color:"var(--dim)",textTransform:"uppercase",letterSpacing:"0.08em"}}>Patient</div>
+                  <div style={{fontSize:15,fontWeight:600}}>{resp.full_name}</div>
+                </div>
+              </div>
+            )}
+            <button onClick={()=>setScreen("home")} className="vi-btn-secondary" style={{marginTop:14,padding:"10px 18px",fontSize:13,borderRadius:10}}>Start New Intake</button>
           </div>
         </div>
-        <div style={{maxWidth:640,margin:"0 auto",padding:"20px 16px 48px"}}>
-          {Object.entries(g).map(([s,items])=>(<div key={s} style={{marginBottom:20}}><div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:c.pri,marginBottom:10,paddingBottom:6,borderBottom:"1px solid "+c.border}}>{s}</div>{items.map((i)=>(<div key={i.f} style={{padding:"8px 12px",background:c.card,borderRadius:8,border:"1px solid "+c.border,marginBottom:8}}><div style={{fontSize:10,color:c.dim,textTransform:"capitalize"}}>{i.f.replace(/_/g," ")}</div><div style={{fontSize:14}}>{i.a}</div></div>))}</div>))}
-          <div style={{marginTop:28,padding:"18px 20px",background:"rgba(16,185,129,.05)",borderRadius:12,border:"1px solid rgba(16,185,129,.15)",textAlign:"center"}}><div style={{fontSize:15,fontWeight:600,color:c.sec}}>Intake Complete</div><div style={{fontSize:12,color:c.mut,marginTop:3}}>Ready to deliver as PDF via secure email.</div></div>
+        <div style={{position:"relative",zIndex:1,maxWidth:680,margin:"0 auto",padding:"24px 16px 60px"}}>
+          {Object.entries(g).map(([s,items])=>(
+            <div key={s} style={{marginBottom:24}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
+                <div style={{width:4,height:16,borderRadius:2,background:"var(--pri)"}}/>
+                <div style={{fontSize:11,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.12em",color:"var(--mut)"}}>{s}</div>
+                <div style={{flex:1,height:1,background:"linear-gradient(90deg,var(--border),transparent)"}}/>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {items.map((i)=>(
+                  <div key={i.f} className="vi-card" style={{padding:"12px 16px"}}>
+                    <div style={{fontSize:10.5,color:"var(--dim)",textTransform:"uppercase",letterSpacing:"0.06em",marginBottom:3}}>{i.f.replace(/_/g," ")}</div>
+                    <div style={{fontSize:14.5,lineHeight:1.5}}>{i.a}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+          <div style={{marginTop:28,padding:"22px 24px",background:"linear-gradient(135deg, rgba(16,185,129,0.10), rgba(91,141,239,0.06))",borderRadius:16,border:"1px solid rgba(16,185,129,0.25)",textAlign:"center"}}>
+            <div style={{width:44,height:44,borderRadius:14,background:"linear-gradient(135deg,#10B981,#059669)",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 12px",boxShadow:"0 14px 30px -14px rgba(16,185,129,0.6)"}}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </div>
+            <div style={{fontSize:16,fontWeight:600,color:"#86EFAC"}}>Intake Complete</div>
+            <div style={{fontSize:13,color:"var(--mut)",marginTop:4}}>Ready to deliver as PDF via secure email.</div>
+          </div>
         </div>
       </div>
     );
