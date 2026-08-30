@@ -58,11 +58,11 @@ CONDOR_HEADERS = ["Ticker", "Spot", "Expiry", "DTE", "Strikes (PL/PS/CS/CL)",
 def bwb_rows(bwbs: list[BrokenWingButterfly], limit: int = 15) -> list[list[str]]:
     rows = []
     for b in bwbs[:limit]:
-        cr = f"${b.net_credit * 100:,.0f} cr" if b.net_credit >= 0 else f"${-b.net_credit * 100:,.0f} db"
+        cr = f"${b.credit_dollars:,.0f} cr" if b.net_credit >= 0 else f"${-b.credit_dollars:,.0f} db"
         rows.append([
             b.ticker, f"{b.spot:.2f}", str(b.expiry), str(b.dte),
             f"+1 {b.long_low:g}p / -2 {b.short_mid:g}p / +1 {b.long_high:g}p",
-            cr, f"${b.max_profit * 100:,.0f}", f"${max(b.max_loss, 0) * 100:,.0f}",
+            cr, f"${b.max_profit_dollars:,.0f}", f"${b.max_loss_dollars:,.0f}",
             f"{b.breakeven_low:.2f}", f"{b.pop_pct:.0f}%",
             "none" if not b.upside_risk else "yes", _earn_flag(b.earnings_before_expiry),
         ])

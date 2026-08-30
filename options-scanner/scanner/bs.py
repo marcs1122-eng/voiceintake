@@ -51,3 +51,25 @@ def put_price(spot: float, strike: float, iv: float, t_years: float, r: float = 
 def call_price(spot: float, strike: float, iv: float, t_years: float, r: float = 0.04) -> float:
     d1, d2 = _d1_d2(spot, strike, iv, t_years, r)
     return spot * _norm_cdf(d1) - strike * math.exp(-r * t_years) * _norm_cdf(d2)
+
+
+def implied_vol(price: float, spot: float, strike: float, t_years: float,
+                r: float = 0.04, is_put: bool = True) -> float:
+    """Back out IV from an option price by bisection. Returns 0.0 when the
+    price is outside the no-arbitrage band (stale/crossed quote)."""
+    if price <= 0 or spot <= 0 or strike <= 0 or t_years <= 0:
+        return 0.0
+    intrinsic = max(strike - spot, 0.0) if is_put else max(spot - strike, 0.0)
+    if price <= intrinsic * 0.999:
+        return 0.0
+    pricer = put_price if is_put else call_price
+    lo, hi = 0.005, 5.0
+    if price >= pricer(spot, strike, hi, t_years, r):
+        return 0.0
+    for _ in range(60):
+        mid = (lo + hi) / 2.0
+        if pricer(spot, strike, mid, t_years, r) < price:
+            lo = mid
+        else:
+            hi = mid
+    return round((lo + hi) / 2.0, 4)

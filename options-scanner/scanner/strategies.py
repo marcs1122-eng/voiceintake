@@ -42,21 +42,30 @@ class CashSecuredPut:
     spread_pct: float
     earnings_before_expiry: bool
     entry_signals: frozenset = frozenset()   # e.g. {"RSI<=30", "LowerBB", "50SMA"}
+    multiplier: float = 100.0                # $ per 1.00 of premium
+    margin_estimate: float | None = None     # futures: initial margin per contract
+
+    @property
+    def is_futures(self) -> bool:
+        return self.margin_estimate is not None
 
     @property
     def capital(self) -> float:
-        """Cash to secure one contract."""
-        return self.strike * 100.0
+        """Capital to hold one contract: full cash for a stock/ETF CSP,
+        initial-margin estimate for a futures short put."""
+        if self.margin_estimate is not None:
+            return self.margin_estimate
+        return self.strike * self.multiplier
 
     @property
     def premium(self) -> float:
         """Credit per contract at mid."""
-        return self.mid * 100.0
+        return self.mid * self.multiplier
 
     @property
     def roc_pct(self) -> float:
         """Return on capital for the trade period, %."""
-        return self.mid / self.strike * 100.0
+        return self.premium / self.capital * 100.0
 
     @property
     def annualized_pct(self) -> float:
@@ -87,14 +96,17 @@ def build_csps(chain: ChainSnapshot, *, min_dte_ok: bool = True,
                min_open_interest: int = 100,
                max_spread_pct: float = 0.25,
                min_premium: float = 0.05,
-               entry_signals: frozenset = frozenset()) -> list[CashSecuredPut]:
+               entry_signals: frozenset = frozenset(),
+               margin_estimate: float | None = None) -> list[CashSecuredPut]:
     """All OTM puts in the chain that pass liquidity/delta filters."""
     out = []
     t = _t_years(chain.dte)
     for q in chain.puts:
         if q.strike >= chain.spot:            # OTM puts only
             continue
-        if q.mid < min_premium or q.iv <= 0:
+        # min_premium is quoted per-share equity-style ($0.10 = $10/contract);
+        # compare in dollars so futures multipliers don't skew the filter
+        if q.mid * chain.multiplier < min_premium * 100.0 or q.iv <= 0:
             continue
         if q.open_interest < min_open_interest:
             continue
@@ -113,6 +125,7 @@ def build_csps(chain: ChainSnapshot, *, min_dte_ok: bool = True,
             volume=q.volume, spread_pct=q.spread_pct,
             earnings_before_expiry=earnings_before_expiry,
             entry_signals=entry_signals,
+            multiplier=chain.multiplier, margin_estimate=margin_estimate,
         ))
     return out
 
@@ -137,6 +150,7 @@ class IronCondor:
     min_open_interest: int
     earnings_before_expiry: bool
     iv_atm: float
+    multiplier: float = 100.0
 
     @property
     def width(self) -> float:
@@ -149,11 +163,11 @@ class IronCondor:
 
     @property
     def max_loss_dollars(self) -> float:
-        return self.max_loss * 100.0
+        return self.max_loss * self.multiplier
 
     @property
     def credit_dollars(self) -> float:
-        return self.credit * 100.0
+        return self.credit * self.multiplier
 
     @property
     def roc_pct(self) -> float:
@@ -223,6 +237,7 @@ def build_iron_condor(chain: ChainSnapshot, *, short_delta: float = 0.16,
         min_open_interest=min(ps.open_interest, cs.open_interest,
                               pl.open_interest, cl.open_interest),
         earnings_before_expiry=earnings_before_expiry, iv_atm=atm.iv,
+        multiplier=chain.multiplier,
     )
 
 
@@ -245,6 +260,20 @@ class BrokenWingButterfly:
     min_open_interest: int
     earnings_before_expiry: bool
     iv_atm: float
+    multiplier: float = 100.0
+
+    @property
+    def credit_dollars(self) -> float:
+        """Net credit per contract (negative = debit)."""
+        return self.net_credit * self.multiplier
+
+    @property
+    def max_profit_dollars(self) -> float:
+        return self.max_profit * self.multiplier
+
+    @property
+    def max_loss_dollars(self) -> float:
+        return max(self.max_loss, 0.0) * self.multiplier
 
     @property
     def upper_width(self) -> float:
@@ -330,4 +359,5 @@ def build_bwb(chain: ChainSnapshot, *, body_delta: float = 0.30,
         body_delta=bs.put_delta(spot, body.strike, body.iv, t),
         min_open_interest=min(k1.open_interest, body.open_interest, k3.open_interest),
         earnings_before_expiry=earnings_before_expiry, iv_atm=atm.iv,
+        multiplier=chain.multiplier,
     )

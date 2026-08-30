@@ -23,6 +23,9 @@ from scanner.universe import DEFAULT_UNIVERSE, Symbol, filter_universe
 def main() -> int:
     ap = argparse.ArgumentParser(description="Scan for CSPs, condors, and broken wing butterflies")
     ap.add_argument("--demo", action="store_true", help="use synthetic data (no network)")
+    ap.add_argument("--tasty", action="store_true",
+                    help="use live tastytrade data (real-time, incl. futures options); "
+                         "needs credentials in .env — see scanner/tastytrade_provider.py")
     ap.add_argument("--tickers", help="comma-separated watchlist override")
     ap.add_argument("--tags", help="only symbols with any of these tags (comma-separated: etf,blue-chip,dividend,growth,high-iv)")
     ap.add_argument("--min-dte", type=int, default=7)
@@ -39,6 +42,9 @@ def main() -> int:
     if args.demo:
         from scanner.data import SyntheticProvider
         provider = SyntheticProvider()
+    elif args.tasty:
+        from scanner.tastytrade_provider import TastytradeProvider
+        provider = TastytradeProvider()
     else:
         try:
             from scanner.data import YFinanceProvider

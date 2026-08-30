@@ -112,6 +112,20 @@ DEFAULT_UNIVERSE: list[Symbol] = [
     _s("O", "blue-chip", "dividend"),
     _s("T", "dividend"),
     _s("VZ", "dividend"),
+    # --- Liquid futures (options on futures; chains require the
+    #     tastytrade provider — Yahoo only feeds their technicals/dips) ---
+    _s("/ES", "futures", "blue-chip"),
+    _s("/NQ", "futures", "blue-chip"),
+    _s("/CL", "futures", "high-iv"),
+    _s("/GC", "futures"),
+    _s("/SI", "futures", "high-iv"),
+    _s("/ZB", "futures"),
+    _s("/ZN", "futures"),
+    _s("/NG", "futures", "high-iv"),
+    _s("/ZC", "futures"),
+    _s("/ZS", "futures"),
+    _s("/ZW", "futures"),
+    _s("/6E", "futures"),
 ]
 
 

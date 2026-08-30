@@ -2,11 +2,16 @@
 
 A personal, free, self-hosted alternative to PowerX Optimizer / Wheel Finder —
 built for selling puts, running the wheel, iron condors, and broken wing
-butterflies. Covers **stocks and ETFs** (SPY, QQQ, XLE, SMH, TLT, GLD…), which
-the paid tools skip.
+butterflies. Covers **stocks, ETFs** (SPY, QQQ, XLE, SMH, TLT, GLD…) **and
+options on liquid futures** (/ES /NQ /CL /GC /SI /ZB /ZN /NG /ZC /ZS /ZW /6E),
+which the paid tools skip.
 
-Data comes free from Yahoo Finance via `yfinance` — no API key, no
-subscription.
+Two data sources:
+- **Yahoo Finance** (`yfinance`) — free, no API key; stocks/ETFs chains plus
+  futures technicals.
+- **tastytrade Open API** — free for account holders; real-time chains for
+  stocks *and futures options*, plus your live account positions. See
+  [tastytrade setup](#tastytrade-setup-real-time--futures--positions).
 
 ## What it does
 
@@ -47,6 +52,27 @@ rank):
 
 A name flashing all three is a washed-out quality dip sitting on support —
 exactly where selling a put pays best.
+
+### Futures options
+
+Futures symbols carry the `futures` tag (`--tags futures` to scan only them).
+Their short puts are **margin-secured**: return-on-capital is premium ÷
+initial-margin estimate (per product in `scanner/futures.py` — update those
+numbers periodically, SPAN margin drifts with volatility), and premium
+dollars use the real contract multiplier (/ES $50/pt, /CL $1,000/pt, …).
+Chains require the tastytrade provider; with Yahoo only, futures still appear
+in the dips radar with entry signals.
+
+### tastytrade setup (real-time + futures + positions)
+
+1. Log into tastytrade → https://developer.tastytrade.com → create an OAuth
+   application and grant → copy the client secret and refresh token.
+2. `cp .env.example .env` and fill both values (`.env` is git-ignored).
+3. Validate: `python -m scanner.tastytrade_check`
+4. Run with `python cli.py --tasty` or flip the toggle in the dashboard.
+
+The dashboard also gains a **💼 Positions** tab: every open position with
+open price, mark, P/L, and % of max profit captured on short options.
 
 ## Quick start
 

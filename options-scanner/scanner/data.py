@@ -49,6 +49,7 @@ class ChainSnapshot:
     expiry: dt.date
     puts: list[OptionQuote]
     calls: list[OptionQuote]
+    multiplier: float = 100.0      # $ per 1.00 of premium (100 for equity options)
 
     @property
     def dte(self) -> int:
@@ -109,8 +110,15 @@ class YFinanceProvider(DataProvider):
         self._info_cache: dict[str, UnderlyingInfo] = {}
 
     def _ticker(self, ticker: str):
+        # Futures roots ("/ES") map to Yahoo continuous contracts ("ES=F")
+        # for price history; Yahoo has no futures OPTIONS chains, so those
+        # symbols only feed the dips radar unless the tastytrade provider
+        # is active.
+        from .futures import product_for
+        prod = product_for(ticker)
+        yahoo = prod.yahoo_symbol if prod else ticker
         if ticker not in self._tickers:
-            self._tickers[ticker] = self._yf.Ticker(ticker)
+            self._tickers[ticker] = self._yf.Ticker(yahoo)
         return self._tickers[ticker]
 
     def underlying(self, ticker: str) -> UnderlyingInfo:
@@ -236,6 +244,12 @@ class SyntheticProvider(DataProvider):
         iv = round(rng.uniform(0.16, 0.65), 3)
         return spot, iv
 
+    @staticmethod
+    def _multiplier(ticker: str) -> float:
+        from .futures import product_for
+        prod = product_for(ticker)
+        return prod.multiplier if prod else 100.0
+
     def underlying(self, ticker: str) -> UnderlyingInfo:
         rng = self._rng(ticker)
         spot, iv = self._spot_iv(ticker)
@@ -279,7 +293,8 @@ class SyntheticProvider(DataProvider):
             half_spread_c = max(0.01, c * 0.03)
             calls.append(OptionQuote(k, round(max(c - half_spread_c, 0), 2),
                                      round(c + half_spread_c, 2), round(iv, 4), oi, vol))
-        return ChainSnapshot(ticker, spot, expiry, puts, calls)
+        return ChainSnapshot(ticker, spot, expiry, puts, calls,
+                             multiplier=self._multiplier(ticker))
 
 
 def _next_friday(today: dt.date, weeks_out: int) -> dt.date:

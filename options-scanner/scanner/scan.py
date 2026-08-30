@@ -58,6 +58,8 @@ def run_scan(provider: DataProvider, universe: list[Symbol],
              cfg: ScanConfig | None = None,
              progress=None) -> ScanResult:
     """Sweep every symbol. `progress` is an optional callback(i, n, ticker)."""
+    from .futures import product_for
+
     cfg = cfg or ScanConfig()
     result = ScanResult()
     tags = {s.ticker: s.tags for s in universe}
@@ -68,6 +70,8 @@ def run_scan(provider: DataProvider, universe: list[Symbol],
         try:
             info = provider.underlying(sym.ticker)
             result.infos[sym.ticker] = info
+            prod = product_for(sym.ticker)
+            margin = prod.margin_estimate if prod else None
             for expiry in _target_expiries(info, cfg):
                 chain = provider.chain(sym.ticker, expiry)
                 earn = _earnings_before(info, expiry)
@@ -77,7 +81,8 @@ def run_scan(provider: DataProvider, universe: list[Symbol],
                     min_open_interest=cfg.min_open_interest,
                     max_spread_pct=cfg.max_spread_pct,
                     min_premium=cfg.min_premium,
-                    entry_signals=info.entry_signals))
+                    entry_signals=info.entry_signals,
+                    margin_estimate=margin))
                 ic = build_iron_condor(
                     chain, short_delta=cfg.condor_short_delta,
                     width_pct=cfg.condor_width_pct,

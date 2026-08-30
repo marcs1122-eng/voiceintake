@@ -212,6 +212,50 @@ def test_entry_signals_boost_csp_score():
         score_csp(plain, frozenset(), cfg) + 12.0)
 
 
+def test_implied_vol_roundtrip():
+    s, k, t = 100.0, 92.0, 30 / 365
+    for true_iv in (0.15, 0.35, 0.80):
+        price = bs.put_price(s, k, true_iv, t)
+        assert bs.implied_vol(price, s, k, t, is_put=True) == pytest.approx(true_iv, abs=0.002)
+    assert bs.implied_vol(0.0, s, k, t) == 0.0
+    assert bs.implied_vol(0.001, s, 200.0, t) == 0.0  # below intrinsic → stale quote
+
+
+def test_futures_csp_uses_margin_and_multiplier():
+    from scanner.strategies import CashSecuredPut
+    # /ES-style: 50x multiplier, $17k margin, 40-point-OTM put at 30.0 mid
+    c = CashSecuredPut(ticker="/ES", spot=5000.0, expiry=dt.date.today() + dt.timedelta(days=30),
+                       dte=30, strike=4900.0, bid=29.0, mid=30.0, iv=0.2, delta=-0.25,
+                       open_interest=5000, volume=100, spread_pct=0.05,
+                       earnings_before_expiry=False, multiplier=50.0,
+                       margin_estimate=17_000.0)
+    assert c.is_futures
+    assert c.premium == 1500.0            # 30.0 * $50
+    assert c.capital == 17_000.0          # margin, not strike*mult
+    assert c.roc_pct == pytest.approx(1500 / 17_000 * 100)
+    # equity behavior unchanged
+    e = CashSecuredPut(ticker="KO", spot=60.0, expiry=c.expiry, dte=30, strike=57.5,
+                       bid=0.5, mid=0.55, iv=0.2, delta=-0.25, open_interest=5000,
+                       volume=100, spread_pct=0.05, earnings_before_expiry=False)
+    assert e.capital == 5750.0 and e.premium == pytest.approx(55.0)
+
+
+def test_synthetic_futures_scan():
+    from scanner.data import SyntheticProvider
+    from scanner.universe import filter_universe
+    provider = SyntheticProvider(seed=7)
+    futs = filter_universe(DEFAULT_UNIVERSE, include_tags={"futures"})[:4]
+    result = run_scan(provider, futs, ScanConfig(min_annualized_pct=0.0))
+    assert not result.errors
+    fut_csps = [c for c in result.csps if c.ticker.startswith("/")]
+    assert fut_csps
+    from scanner.futures import product_for
+    for c in fut_csps:
+        prod = product_for(c.ticker)
+        assert c.multiplier == prod.multiplier
+        assert c.capital == prod.margin_estimate
+
+
 def test_universe_filters():
     etfs = filter_universe(DEFAULT_UNIVERSE, include_tags={"etf"})
     assert etfs and all(s.has("etf") for s in etfs)

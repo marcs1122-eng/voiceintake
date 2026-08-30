@@ -20,11 +20,21 @@ st.title("🎯 Options Income Scanner")
 st.caption("Cash-secured puts · wheel · iron condors · broken wing butterflies — "
            "stocks **and** ETFs. Estimates at mid; not financial advice.")
 
-ALL_TAGS = ["etf", "blue-chip", "dividend", "growth", "high-iv"]
+ALL_TAGS = ["etf", "blue-chip", "dividend", "growth", "high-iv", "futures"]
+
+try:
+    from scanner.tastytrade_provider import has_credentials as _tasty_ready
+    TASTY_AVAILABLE = _tasty_ready()
+except Exception:
+    TASTY_AVAILABLE = False
 
 with st.sidebar:
     st.header("Scan settings")
     demo = st.toggle("Demo mode (synthetic data)", value=bool(os.environ.get("SCANNER_DEMO")))
+    use_tasty = st.toggle("tastytrade live data (real-time, incl. futures)",
+                          value=TASTY_AVAILABLE, disabled=not TASTY_AVAILABLE,
+                          help="Needs TASTYTRADE_CLIENT_SECRET / TASTYTRADE_REFRESH_TOKEN "
+                               "in options-scanner/.env — run `python -m scanner.tastytrade_check`")
     tags = st.multiselect("Universe tags (empty = everything)", ALL_TAGS, default=[])
     watchlist = st.text_input("Watchlist override (comma-separated)", "")
     dte = st.slider("Days to expiration", 0, 90, (7, 45))
@@ -51,6 +61,13 @@ if go:
     if demo:
         from scanner.data import SyntheticProvider
         provider = SyntheticProvider()
+    elif use_tasty:
+        try:
+            from scanner.tastytrade_provider import TastytradeProvider
+            provider = TastytradeProvider()
+        except Exception as exc:
+            st.error(f"tastytrade login failed: {exc}")
+            st.stop()
     else:
         try:
             from scanner.data import YFinanceProvider
@@ -88,8 +105,9 @@ m4.metric("Tickers scanned", len(result.infos))
 if result.errors:
     st.warning(f"Skipped (data errors): {', '.join(sorted(result.errors))}")
 
-tab_csp, tab_ic, tab_bwb, tab_dip = st.tabs(
-    ["📉 Puts / Wheel", "🦅 Iron Condors", "🦋 Broken Wing Flies", "🔻 Quality Dips"])
+tab_csp, tab_ic, tab_bwb, tab_dip, tab_pos = st.tabs(
+    ["📉 Puts / Wheel", "🦅 Iron Condors", "🦋 Broken Wing Flies",
+     "🔻 Quality Dips", "💼 Positions"])
 
 _tags = {s.ticker: s.tags for s in universe}
 from scanner.scan import score_bwb, score_condor, score_csp  # noqa: E402
@@ -103,7 +121,9 @@ with tab_csp:
             "Score": score_csp(c, _tags.get(c.ticker, frozenset()), _cfg),
             "Ticker": c.ticker, "Spot": round(c.spot, 2), "Expiry": str(c.expiry),
             "DTE": c.dte, "Strike": c.strike, "Mid": c.mid,
-            "Premium/ct $": round(c.premium), "Capital $": round(c.capital),
+            "Premium/ct $": round(c.premium),
+            "Capital $": round(c.capital),
+            "Basis": "margin" if c.is_futures else "cash",
             "ROC %": round(c.roc_pct, 2), "Annualized %": round(c.annualized_pct, 1),
             "Breakeven": round(c.breakeven, 2),
             "Cushion %": round(c.downside_protection_pct, 1),
@@ -168,3 +188,23 @@ with tab_dip:
         } for d in dips])
         st.dataframe(df, use_container_width=True, hide_index=True)
         st.download_button("Download CSV", df.to_csv(index=False), "dips.csv")
+
+with tab_pos:
+    st.caption("Live open positions from your tastytrade account (read-only). "
+               "For short options, '% of max profit' is how much of the credit "
+               "you've already captured — many sellers close at 50%.")
+    if not TASTY_AVAILABLE:
+        st.info("Connect tastytrade to see positions: put your API credentials in "
+                "`options-scanner/.env`, then run `python -m scanner.tastytrade_check`.")
+    else:
+        try:
+            from scanner.tastytrade_provider import TastytradeProvider, get_positions
+            rows = get_positions(TastytradeProvider().session)
+            if not rows:
+                st.write("No open positions.")
+            else:
+                pos_df = pd.DataFrame(rows).rename(columns={
+                    "pl_open": "P/L open $", "pct_of_max_profit": "% of max profit"})
+                st.dataframe(pos_df, use_container_width=True, hide_index=True)
+        except Exception as exc:
+            st.error(f"Couldn't load positions: {exc}")
