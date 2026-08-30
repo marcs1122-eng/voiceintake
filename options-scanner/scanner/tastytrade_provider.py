@@ -304,16 +304,22 @@ class TastytradeProvider(DataProvider):
 # ----------------------------------------------------------------------
 
 def position_suggestion(pct_of_max: float | None, dte: int | None,
-                        is_short: bool) -> str:
-    """Plain-language management call for a position, premium-seller style:
-    take profits at 50% of max, defend when tested, respect the 21-DTE
-    roll/close window (gamma risk grows fast inside it)."""
+                        is_short: bool, days_held: int | None = None) -> str:
+    """Plain-language management call for a short option, using Mac's ladder:
+    take profit at 25% on day one, 30% on day two, then 50% of max (or the
+    21-DTE roll/close window, whichever comes first). Defend when tested."""
     if not is_short or pct_of_max is None:
         return ""
-    if pct_of_max >= 50:
-        return f"💰 CLOSE — {pct_of_max:.0f}% of max captured"
     if pct_of_max < 0:
         return "⚠️ TESTED — mark above entry, manage it"
+    if days_held == 0:
+        target, label = 25.0, "day-1 rule (25%)"
+    elif days_held == 1:
+        target, label = 30.0, "day-2 rule (30%)"
+    else:
+        target, label = 50.0, "50% rule"
+    if pct_of_max >= target:
+        return f"💰 CLOSE — {pct_of_max:.0f}% captured, hit the {label}"
     if dte is not None and dte <= 21:
         return f"⏰ {dte} DTE — inside the 21-DTE roll/close window"
     return "hold"
@@ -345,6 +351,14 @@ def get_positions(session) -> list[dict]:
                 except (TypeError, AttributeError):
                     pass
 
+            opened = getattr(p, "created_at", None)
+            days_held = None
+            if opened is not None:
+                try:
+                    days_held = (today - opened.date()).days
+                except (TypeError, AttributeError):
+                    pass
+
             rows.append({
                 "account": acct.account_number,
                 "symbol": p.symbol,
@@ -357,6 +371,7 @@ def get_positions(session) -> list[dict]:
                 "pct_of_max_profit": round(pct_of_max, 1) if pct_of_max is not None else None,
                 "dte": dte,
                 "expires": expires,
-                "suggestion": position_suggestion(pct_of_max, dte, sign < 0),
+                "days_held": days_held,
+                "suggestion": position_suggestion(pct_of_max, dte, sign < 0, days_held),
             })
     return rows

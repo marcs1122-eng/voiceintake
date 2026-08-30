@@ -292,10 +292,16 @@ def test_providers_accept_timeframe():
 def test_position_suggestions():
     from scanner.tastytrade_provider import position_suggestion
 
-    assert "CLOSE" in position_suggestion(62.0, 30, True)          # winner: take it
-    assert "TESTED" in position_suggestion(-15.0, 30, True)        # losing short
-    assert "21-DTE" in position_suggestion(20.0, 14, True)         # roll window
-    assert position_suggestion(20.0, 35, True) == "hold"           # healthy, wait
+    # Mac's ladder: 25% day one, 30% day two, then 50% / 21 DTE
+    assert "day-1" in position_suggestion(26.0, 40, True, days_held=0)
+    assert position_suggestion(20.0, 40, True, days_held=0) == "hold"
+    assert "day-2" in position_suggestion(31.0, 40, True, days_held=1)
+    assert position_suggestion(31.0, 40, True, days_held=5) == "hold"  # 31% later: wait for 50
+    assert "50% rule" in position_suggestion(62.0, 30, True, days_held=10)
+    assert "CLOSE" in position_suggestion(62.0, 30, True)          # unknown open date → 50% rule
+    assert "TESTED" in position_suggestion(-15.0, 30, True, days_held=0)
+    assert "21-DTE" in position_suggestion(20.0, 14, True, days_held=10)
+    assert position_suggestion(20.0, 35, True, days_held=10) == "hold"
     assert position_suggestion(None, 5, True) == ""                # no data
     assert position_suggestion(80.0, 5, False) == ""               # long position
 

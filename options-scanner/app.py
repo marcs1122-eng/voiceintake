@@ -139,13 +139,77 @@ m4.metric("Tickers scanned", len(result.infos))
 if result.errors:
     st.warning(f"Skipped (data errors): {', '.join(sorted(result.errors))}")
 
-tab_csp, tab_ic, tab_bwb, tab_dip, tab_pos = st.tabs(
-    ["📉 Puts / Wheel", "🦅 Iron Condors", "🦋 Broken Wing Flies",
+tab_plan, tab_csp, tab_ic, tab_bwb, tab_dip, tab_pos = st.tabs(
+    ["📋 Trade Plan", "📉 Puts / Wheel", "🦅 Iron Condors", "🦋 Broken Wing Flies",
      "🔻 Quality Dips", "💼 Positions"])
 
 _tags = {s.ticker: s.tags for s in universe}
 from scanner.scan import score_bwb, score_condor, score_csp  # noqa: E402
 _cfg = ScanConfig()
+
+with tab_plan:
+    st.caption(f"The scan, boiled down to actions — generated {pulled}. "
+               "Confirm live premiums before entering. Not financial advice.")
+
+    # -- What needs attention in the account first --
+    if TASTY_AVAILABLE:
+        try:
+            from scanner.tastytrade_provider import TastytradeProvider as _TP, get_positions as _gp
+            action_rows = [r for r in _gp(_TP().session)
+                           if r["suggestion"] and r["suggestion"] != "hold"]
+            if action_rows:
+                st.subheader("🔔 Your open positions that need action")
+                for r in action_rows:
+                    st.markdown(f"- **{r['symbol']}** ({r['direction']} {r['qty']:g}): "
+                                f"{r['suggestion']} — open {r['open_price']:g}, "
+                                f"mark {r['mark']:g}, P/L ${r['pl_open']:,.0f}")
+        except Exception:
+            pass
+
+    # -- Best new trades: top-scored put per ticker, quality bar applied --
+    st.subheader("🎯 Recommended trades to put on")
+    seen, picks = set(), []
+    for c in result.csps:
+        s = score_csp(c, _tags.get(c.ticker, frozenset()), _cfg)
+        if c.ticker in seen or s < 70 or c.prob_otm_pct < 65:
+            continue
+        seen.add(c.ticker)
+        picks.append((s, c))
+        if len(picks) == 3:
+            break
+    if not picks:
+        st.write("Nothing clears the quality bar right now (score ≥ 70 and "
+                 "P(OTM) ≥ 65%). That's an answer too — don't force it.")
+    for s, c in picks:
+        why = list(sorted(c.entry_signals))
+        info = result.infos.get(c.ticker)
+        if info is not None and info.at_day_low:
+            why.append("at the low of day")
+        why_txt = ", ".join(why) if why else "yield + liquidity"
+        st.markdown(
+            f"**SELL {c.ticker} {c.strike:g} put, exp {c.expiry:%m/%d/%Y}** ({c.dte} DTE) — "
+            f"collect **~${c.premium:,.0f}** on ${c.capital:,.0f} "
+            f"{'margin' if c.is_futures else 'cash'} "
+            f"({c.annualized_pct:.0f}% annualized). "
+            f"{c.prob_otm_pct:.0f}% chance it expires worthless; breakeven {c.breakeven:,.2f} "
+            f"({c.downside_protection_pct:.1f}% cushion). "
+            f"*Why now: {why_txt}. Score {s}.*"
+            + (" ⚠️ **Earnings before expiry.**" if c.earnings_before_expiry else ""))
+
+    # -- One defined-risk idea --
+    if result.condors:
+        ic = result.condors[0]
+        st.subheader("🦅 Defined-risk alternative")
+        st.markdown(
+            f"**{ic.ticker} iron condor {ic.put_long:g}/{ic.put_short:g} — "
+            f"{ic.call_short:g}/{ic.call_long:g}, exp {ic.expiry:%m/%d/%Y}** ({ic.dte} DTE): "
+            f"collect **${ic.credit_dollars:,.0f}**, risk ${ic.max_loss_dollars:,.0f}, "
+            f"{ic.pop_pct:.0f}% probability of profit. Profits if price stays between "
+            f"{ic.breakeven_low:,.2f} and {ic.breakeven_high:,.2f}.")
+
+    st.caption("Exit plan for anything you open: 25% of max on day one, 30% on "
+               "day two, then 50% or the 21-DTE window — same rules the "
+               "Positions tab enforces.")
 
 with tab_csp:
     if not result.csps:
@@ -260,10 +324,11 @@ with tab_pos:
                     "direction": "Dir", "qty": "Qty", "open_price": "Open",
                     "mark": "Mark", "pl_open": "P/L open $",
                     "pct_of_max_profit": "% of max profit",
-                    "dte": "DTE", "expires": "Expires", "suggestion": "Suggestion"})
+                    "dte": "DTE", "expires": "Expires",
+                    "days_held": "Held (days)", "suggestion": "Suggestion"})
                 cols = ["Suggestion", "Symbol", "Dir", "Qty", "Open", "Mark",
-                        "P/L open $", "% of max profit", "DTE", "Expires",
-                        "Type", "Account"]
+                        "P/L open $", "% of max profit", "Held (days)", "DTE",
+                        "Expires", "Type", "Account"]
                 pos_df = pos_df[[c for c in cols if c in pos_df.columns]]
                 st.dataframe(pos_df, use_container_width=True, hide_index=True)
         except Exception as exc:
