@@ -182,6 +182,36 @@ def test_max_capital_filter():
     assert all(c.capital <= 10_000 for c in result.csps)
 
 
+def test_entry_signals():
+    from scanner.data import UnderlyingInfo
+
+    base = dict(ticker="X", day_change_pct=0.0, pct_off_52w_high=-5.0,
+                hist_vol_20d=0.3, next_earnings=None, expiries=[])
+    # oversold + at lower band + at 50-SMA support
+    hot = UnderlyingInfo(spot=100.0, rsi_14=28.0, sma_50=99.5,
+                         boll_lower=101.0, boll_upper=115.0, **base)
+    assert hot.entry_signals == {"RSI<=30", "LowerBB", "50SMA"}
+    # nothing triggered: RSI high, far above band and SMA
+    cold = UnderlyingInfo(spot=100.0, rsi_14=60.0, sma_50=80.0,
+                          boll_lower=90.0, boll_upper=110.0, **base)
+    assert cold.entry_signals == frozenset()
+    # below the SMA band (broken support) does not count as 50SMA
+    below = UnderlyingInfo(spot=100.0, rsi_14=60.0, sma_50=105.0,
+                           boll_lower=90.0, boll_upper=110.0, **base)
+    assert "50SMA" not in below.entry_signals
+
+
+def test_entry_signals_boost_csp_score():
+    from scanner.scan import score_csp
+    cfg = ScanConfig()
+    csps = build_csps(_chain(), entry_signals=frozenset())
+    assert csps
+    plain = csps[0]
+    boosted = build_csps(_chain(), entry_signals=frozenset({"RSI<=30", "LowerBB"}))[0]
+    assert score_csp(boosted, frozenset(), cfg) == pytest.approx(
+        score_csp(plain, frozenset(), cfg) + 12.0)
+
+
 def test_universe_filters():
     etfs = filter_universe(DEFAULT_UNIVERSE, include_tags={"etf"})
     assert etfs and all(s.has("etf") for s in etfs)

@@ -109,6 +109,7 @@ with tab_csp:
             "Cushion %": round(c.downside_protection_pct, 1),
             "Delta": round(abs(c.delta), 2), "P(OTM) %": round(c.prob_otm_pct),
             "IV %": round(c.iv * 100), "OI": c.open_interest,
+            "Signals": " + ".join(sorted(c.entry_signals)),
             "Earnings⚠": c.earnings_before_expiry,
         } for c in result.csps])
         st.dataframe(df, use_container_width=True, hide_index=True)
@@ -151,14 +152,18 @@ with tab_bwb:
 
 with tab_dip:
     st.caption("Quality names most washed out — candidates to start the wheel on. "
-               "DipScore blends today's drop, distance off the 52-week high, and RSI.")
+               "DipScore blends today's drop, distance off the 52-week high, RSI, "
+               "and the entry signals: RSI≤30, lower Bollinger Band touch, 50-SMA support.")
     if not dips:
         st.write("No dip candidates.")
     else:
         df = pd.DataFrame([{
             "DipScore": d.dip_score, "Ticker": d.ticker, "Spot": round(d.spot, 2),
             "Day %": d.day_change_pct, "Off 52w high %": d.pct_off_52w_high,
-            "RSI(14)": d.rsi_14, "Tags": ", ".join(sorted(d.tags)),
+            "RSI(14)": d.rsi_14, "SMA50": round(d.sma_50, 2) if d.sma_50 else None,
+            "Lower BB": round(d.boll_lower, 2) if d.boll_lower else None,
+            "Signals": " + ".join(sorted(d.entry_signals)),
+            "Tags": ", ".join(sorted(d.tags)),
             "Next earnings": str(d.next_earnings) if d.next_earnings else "—",
         } for d in dips])
         st.dataframe(df, use_container_width=True, hide_index=True)

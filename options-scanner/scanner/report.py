@@ -30,12 +30,14 @@ def csp_rows(csps: list[CashSecuredPut], limit: int = 20) -> list[list[str]]:
         f"{c.roc_pct:.2f}%", f"{c.annualized_pct:.1f}%",
         f"{c.breakeven:.2f}", f"{c.downside_protection_pct:.1f}%",
         f"{abs(c.delta):.2f}", f"{c.prob_otm_pct:.0f}%",
-        f"{c.iv * 100:.0f}%", str(c.open_interest), _earn_flag(c.earnings_before_expiry),
+        f"{c.iv * 100:.0f}%", str(c.open_interest),
+        "+".join(sorted(c.entry_signals)), _earn_flag(c.earnings_before_expiry),
     ] for c in csps[:limit]]
 
 
 CSP_HEADERS = ["Ticker", "Spot", "Expiry", "DTE", "Strike", "Mid", "Prem/ct",
-               "ROC", "Annual", "B/E", "Cushion", "Delta", "P(OTM)", "IV", "OI", ""]
+               "ROC", "Annual", "B/E", "Cushion", "Delta", "P(OTM)", "IV", "OI",
+               "Signals", ""]
 
 
 def condor_rows(condors: list[IronCondor], limit: int = 15) -> list[list[str]]:
@@ -75,12 +77,15 @@ def dip_rows(dips: list[DipCandidate], limit: int = 15) -> list[list[str]]:
     return [[
         d.ticker, f"{d.spot:.2f}", f"{d.day_change_pct:+.2f}%",
         f"{d.pct_off_52w_high:.1f}%", f"{d.rsi_14:.0f}",
+        f"{d.sma_50:.2f}" if d.sma_50 else "", f"{d.boll_lower:.2f}" if d.boll_lower else "",
+        "+".join(sorted(d.entry_signals)),
         f"{d.dip_score:.0f}", ",".join(sorted(d.tags)),
         str(d.next_earnings) if d.next_earnings else "",
     ] for d in dips[:limit]]
 
 
-DIP_HEADERS = ["Ticker", "Spot", "Day", "Off 52w Hi", "RSI", "DipScore", "Tags", "Earnings"]
+DIP_HEADERS = ["Ticker", "Spot", "Day", "Off 52w Hi", "RSI", "SMA50", "LowerBB",
+               "Signals", "DipScore", "Tags", "Earnings"]
 
 
 def render_console(result: ScanResult, dips: list[DipCandidate],

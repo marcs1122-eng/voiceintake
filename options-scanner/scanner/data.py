@@ -65,6 +65,26 @@ class UnderlyingInfo:
     rsi_14: float
     next_earnings: dt.date | None = None
     expiries: list[dt.date] = field(default_factory=list)
+    sma_50: float = 0.0            # 50-day simple moving average
+    boll_lower: float = 0.0        # 20-day Bollinger lower band (2σ)
+    boll_upper: float = 0.0
+
+    @property
+    def entry_signals(self) -> frozenset:
+        """Technical entry conditions for selling puts on this name.
+
+        RSI<=30    — oversold
+        LowerBB    — at/inside 2% of the lower Bollinger Band
+        50SMA      — sitting at or just above the 50-day SMA (support)
+        """
+        sig = set()
+        if self.rsi_14 <= 30:
+            sig.add("RSI<=30")
+        if self.boll_lower > 0 and self.spot <= self.boll_lower * 1.02:
+            sig.add("LowerBB")
+        if self.sma_50 > 0 and 0.99 <= self.spot / self.sma_50 <= 1.03:
+            sig.add("50SMA")
+        return frozenset(sig)
 
 
 class DataProvider:
@@ -113,6 +133,15 @@ class YFinanceProvider(DataProvider):
 
         rsi = _rsi(close.tail(60).tolist(), 14)
 
+        sma_50 = float(close.tail(50).mean()) if len(close) >= 50 else spot
+        last20 = close.tail(20)
+        if len(last20) >= 20:
+            mid = float(last20.mean())
+            sd = float(last20.std())
+            boll_lower, boll_upper = mid - 2 * sd, mid + 2 * sd
+        else:
+            boll_lower = boll_upper = 0.0
+
         next_earnings = None
         try:
             cal = t.get_earnings_dates(limit=8)
@@ -131,7 +160,9 @@ class YFinanceProvider(DataProvider):
             pass
 
         info = UnderlyingInfo(ticker, spot, day_change, off_high, hv20, rsi,
-                              next_earnings, expiries)
+                              next_earnings, expiries,
+                              sma_50=sma_50, boll_lower=boll_lower,
+                              boll_upper=boll_upper)
         self._info_cache[ticker] = info
         return info
 
@@ -220,6 +251,9 @@ class SyntheticProvider(DataProvider):
             hist_vol_20d=round(iv * rng.uniform(0.7, 1.1), 3),
             rsi_14=round(rng.uniform(22, 75), 1),
             next_earnings=earnings, expiries=expiries,
+            sma_50=round(spot * rng.uniform(0.92, 1.12), 2),
+            boll_lower=round(spot * rng.uniform(0.94, 1.01), 2),
+            boll_upper=round(spot * rng.uniform(1.03, 1.10), 2),
         )
 
     def chain(self, ticker: str, expiry: dt.date) -> ChainSnapshot:

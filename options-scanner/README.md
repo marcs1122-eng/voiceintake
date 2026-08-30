@@ -31,8 +31,22 @@ profit, max loss, lower breakeven, POP, and whether there's any upside risk
 (credit flies have none).
 
 **🔻 Quality Dips tab** — the "which quality names are down the most" radar:
-day % change, distance off 52-week high, RSI(14), next earnings, plus a
-DipScore for ranking wheel entries.
+day % change, distance off 52-week high, RSI(14), 50-day SMA, lower Bollinger
+Band, next earnings, plus a DipScore for ranking wheel entries.
+
+### Technical entry signals
+
+Every underlying is tagged with put-selling entry signals, shown as a
+`Signals` column and baked into the scores (each one lifts a candidate's
+rank):
+
+- `RSI<=30` — RSI(14) at or below 30 (oversold)
+- `LowerBB` — price at or within 2% of the lower 20-day Bollinger Band (2σ)
+- `50SMA` — price sitting at or just above the 50-day SMA (−1%…+3%), i.e.
+  selling puts into support rather than into a broken chart
+
+A name flashing all three is a washed-out quality dip sitting on support —
+exactly where selling a put pays best.
 
 ## Quick start
 

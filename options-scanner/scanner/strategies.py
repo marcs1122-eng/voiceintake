@@ -41,6 +41,7 @@ class CashSecuredPut:
     volume: int
     spread_pct: float
     earnings_before_expiry: bool
+    entry_signals: frozenset = frozenset()   # e.g. {"RSI<=30", "LowerBB", "50SMA"}
 
     @property
     def capital(self) -> float:
@@ -85,7 +86,8 @@ def build_csps(chain: ChainSnapshot, *, min_dte_ok: bool = True,
                delta_range: tuple[float, float] = (0.10, 0.40),
                min_open_interest: int = 100,
                max_spread_pct: float = 0.25,
-               min_premium: float = 0.05) -> list[CashSecuredPut]:
+               min_premium: float = 0.05,
+               entry_signals: frozenset = frozenset()) -> list[CashSecuredPut]:
     """All OTM puts in the chain that pass liquidity/delta filters."""
     out = []
     t = _t_years(chain.dte)
@@ -110,6 +112,7 @@ def build_csps(chain: ChainSnapshot, *, min_dte_ok: bool = True,
             iv=q.iv, delta=delta, open_interest=q.open_interest,
             volume=q.volume, spread_pct=q.spread_pct,
             earnings_before_expiry=earnings_before_expiry,
+            entry_signals=entry_signals,
         ))
     return out
 

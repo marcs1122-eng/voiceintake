@@ -76,7 +76,8 @@ def run_scan(provider: DataProvider, universe: list[Symbol],
                     delta_range=(cfg.delta_min, cfg.delta_max),
                     min_open_interest=cfg.min_open_interest,
                     max_spread_pct=cfg.max_spread_pct,
-                    min_premium=cfg.min_premium))
+                    min_premium=cfg.min_premium,
+                    entry_signals=info.entry_signals))
                 ic = build_iron_condor(
                     chain, short_delta=cfg.condor_short_delta,
                     width_pct=cfg.condor_width_pct,
@@ -115,7 +116,11 @@ def score_csp(c: CashSecuredPut, tags: frozenset, cfg: ScanConfig) -> float:
     protection = min(c.downside_protection_pct / 15.0, 1.0) * 15.0  # 15 pts: cushion
     liquidity = min(c.open_interest / 2000.0, 1.0) * 10.0          # 10 pts
     quality = 10.0 if ("blue-chip" in tags or "etf" in tags) else 4.0
-    score = yield_score + safety + protection + liquidity + quality
+    # Technical entry bonus: oversold RSI, lower Bollinger touch, 50-SMA
+    # support each add 6 pts — a washed-out quality name beats a random one
+    # at the same yield.
+    entry = min(len(c.entry_signals), 3) * 6.0
+    score = yield_score + safety + protection + liquidity + quality + entry
     if c.earnings_before_expiry and cfg.avoid_earnings:
         score -= 20.0
     if c.spread_pct > 0.12:
@@ -157,14 +162,19 @@ class DipCandidate:
     rsi_14: float
     tags: frozenset
     next_earnings: dt.date | None
+    entry_signals: frozenset = frozenset()
+    sma_50: float = 0.0
+    boll_lower: float = 0.0
 
     @property
     def dip_score(self) -> float:
-        """Bigger = more washed out. Day drop + distance off high + oversold RSI."""
+        """Bigger = more washed out. Day drop + distance off high + oversold
+        RSI, plus a bonus per technical entry signal (RSI<=30 / LowerBB / 50SMA)."""
         day = max(-self.day_change_pct, 0.0) * 3.0
         off_high = max(-self.pct_off_52w_high, 0.0) * 0.8
         oversold = max(40.0 - self.rsi_14, 0.0) * 1.2
-        return round(day + off_high + oversold, 1)
+        signals = len(self.entry_signals) * 10.0
+        return round(day + off_high + oversold + signals, 1)
 
 
 def rank_dips(infos: dict[str, UnderlyingInfo], universe: list[Symbol],
@@ -177,6 +187,7 @@ def rank_dips(infos: dict[str, UnderlyingInfo], universe: list[Symbol],
             continue
         out.append(DipCandidate(tk, info.spot, info.day_change_pct,
                                 info.pct_off_52w_high, info.rsi_14, t,
-                                info.next_earnings))
+                                info.next_earnings, info.entry_signals,
+                                info.sma_50, info.boll_lower))
     out.sort(key=lambda d: d.dip_score, reverse=True)
     return out
