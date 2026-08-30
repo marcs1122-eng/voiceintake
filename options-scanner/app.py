@@ -118,13 +118,18 @@ if go:
 
     result = run_scan(provider, universe, cfg, progress=progress)
     bar.empty()
-    st.session_state.result = (result, rank_dips(result.infos, universe), universe)
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    scan_time = datetime.now(ZoneInfo("America/New_York"))
+    st.session_state.result = (result, rank_dips(result.infos, universe), universe, scan_time)
 
 if st.session_state.result is None:
     st.info("Set your filters in the sidebar and hit **Run scan**.")
     st.stop()
 
-result, dips, universe = st.session_state.result
+result, dips, universe, scan_time = st.session_state.result
+pulled = scan_time.strftime("%m/%d %I:%M:%S %p ET")
+st.caption(f"🕐 Data pulled: **{pulled}** — snapshot at scan time; hit Run scan to refresh.")
 
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Put candidates", len(result.csps))
@@ -157,6 +162,7 @@ with tab_csp:
             return ""
 
         df = pd.DataFrame([{
+            "Pulled": pulled,
             "Score": score_csp(c, _tags.get(c.ticker, frozenset()), _cfg),
             "Ticker": c.ticker, "Spot": round(c.spot, 2),
             "RSI": round(c.rsi_14, 1),
