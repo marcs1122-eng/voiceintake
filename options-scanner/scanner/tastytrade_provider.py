@@ -22,6 +22,7 @@ Design notes:
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import os
 
@@ -31,6 +32,18 @@ from .futures import is_futures, product_for
 
 QUOTE_BATCH = 90          # market-data endpoint symbol limit per call
 MAX_STRIKES_EACH_SIDE = 40  # strikes fetched around the money per expiry
+
+_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _run(coro):
+    """tastytrade SDK v13+ is async-only. Run its coroutines on one
+    persistent event loop so SDK connection state survives across calls
+    (asyncio.run would tear the loop down every time)."""
+    global _loop
+    if _loop is None or _loop.is_closed():
+        _loop = asyncio.new_event_loop()
+    return _loop.run_until_complete(coro)
 
 
 def _load_env_file() -> None:
@@ -100,9 +113,9 @@ class TastytradeProvider(DataProvider):
         try:
             if is_futures(ticker):
                 front = self._front_future_symbol(ticker)
-                md = get_market_data_by_type(self.session, futures=[front]) if front else []
+                md = _run(get_market_data_by_type(self.session, futures=[front])) if front else []
             else:
-                md = get_market_data_by_type(self.session, equities=[ticker])
+                md = _run(get_market_data_by_type(self.session, equities=[ticker]))
             if md and (md[0].mark or md[0].last):
                 return float(md[0].mark or md[0].last)
         except Exception:
@@ -117,7 +130,7 @@ class TastytradeProvider(DataProvider):
         """{expiry_date: NestedOptionChainExpiration} plus shares/contract."""
         if ticker not in self._equity_chains:
             from tastytrade.instruments import NestedOptionChain
-            chains = NestedOptionChain.get(self.session, ticker)
+            chains = _run(NestedOptionChain.get(self.session, ticker))
             if not chains:
                 raise ValueError(f"no option chain for {ticker}")
             chain = chains[0]
@@ -131,7 +144,7 @@ class TastytradeProvider(DataProvider):
         """{expiry_date: (underlying_future_symbol, NestedFutureOptionChainExpiration)}."""
         if ticker not in self._future_chains:
             from tastytrade.instruments import NestedFutureOptionChain
-            chain = NestedFutureOptionChain.get(self.session, ticker)
+            chain = _run(NestedFutureOptionChain.get(self.session, ticker))
             expirations: dict[dt.date, tuple[str, object]] = {}
             for sub in chain.option_chains:
                 for e in sub.expirations:
@@ -182,7 +195,7 @@ class TastytradeProvider(DataProvider):
         kwarg = "future_options" if is_futures(ticker) else "options"
         for i in range(0, len(symbols), QUOTE_BATCH):
             batch = symbols[i:i + QUOTE_BATCH]
-            for md in get_market_data_by_type(self.session, **{kwarg: batch}):
+            for md in _run(get_market_data_by_type(self.session, **{kwarg: batch})):
                 quotes[md.symbol] = md
 
         t_years = max((expiry - dt.date.today()).days, 1) / 365.0
@@ -217,8 +230,8 @@ def get_positions(session) -> list[dict]:
     """Flat, display-ready list of every open position across accounts."""
     from tastytrade import Account
     rows = []
-    for acct in Account.get(session):
-        for p in acct.get_positions(session):
+    for acct in _run(Account.get(session)):
+        for p in _run(acct.get_positions(session)):
             mult = float(p.multiplier or 1)
             qty = float(p.quantity or 0)
             sign = -1.0 if str(p.quantity_direction).lower().startswith("short") else 1.0
