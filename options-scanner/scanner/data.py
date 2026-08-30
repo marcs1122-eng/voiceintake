@@ -182,15 +182,7 @@ class YFinanceProvider(DataProvider):
             except Exception:
                 pass  # fall back to daily-bar signals
 
-        rsi = _rsi(sig_close.tail(60).tolist(), 14)
-        sma_50 = float(sig_close.tail(50).mean()) if len(sig_close) >= 50 else spot
-        last20 = sig_close.tail(20)
-        if len(last20) >= 20:
-            mid = float(last20.mean())
-            sd = float(last20.std())
-            boll_lower, boll_upper = mid - 2 * sd, mid + 2 * sd
-        else:
-            boll_lower = boll_upper = 0.0
+        rsi, sma_50, boll_lower, boll_upper = signal_stats(sig_close.tolist(), spot)
 
         next_earnings = None
         try:
@@ -249,6 +241,19 @@ def _is_nan(x) -> bool:
         return math.isnan(float(x))
     except (TypeError, ValueError):
         return True
+
+
+def signal_stats(closes: list[float], spot: float) -> tuple[float, float, float, float]:
+    """(rsi14, sma50, boll_lower, boll_upper) from a close series on any timeframe."""
+    rsi = _rsi(closes[-60:], 14)
+    sma_50 = sum(closes[-50:]) / 50.0 if len(closes) >= 50 else spot
+    last20 = closes[-20:]
+    if len(last20) >= 20:
+        mid = sum(last20) / len(last20)
+        var = sum((c - mid) ** 2 for c in last20) / (len(last20) - 1)
+        sd = var ** 0.5
+        return rsi, sma_50, mid - 2 * sd, mid + 2 * sd
+    return rsi, sma_50, 0.0, 0.0
 
 
 def _rsi(closes: list[float], period: int = 14) -> float:

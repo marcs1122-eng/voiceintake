@@ -102,6 +102,15 @@ class TastytradeProvider(DataProvider):
             info = UnderlyingInfo(ticker=ticker, spot=0.0, day_change_pct=0.0,
                                   pct_off_52w_high=0.0, hist_vol_20d=0.0,
                                   rsi_14=50.0)
+        # Intraday scalp mode: replace Yahoo's ~15-min-delayed candle signals
+        # with LIVE candles from tastytrade's dxFeed streamer when possible.
+        if self.timeframe != "1d":
+            closes = self._candle_closes(ticker)
+            if len(closes) >= 21:
+                from .data import signal_stats
+                (info.rsi_14, info.sma_50,
+                 info.boll_lower, info.boll_upper) = signal_stats(closes, info.spot or closes[-1])
+
         md = self._live_quote(ticker)
         if md is not None:
             if md.mark or md.last:
@@ -116,6 +125,61 @@ class TastytradeProvider(DataProvider):
         info.expiries = self._expiries(ticker)
         self._info_cache[ticker] = info
         return info
+
+    # Bars of history to backfill per timeframe (enough for a 50-bar SMA).
+    _CANDLE_LOOKBACK = {"5m": dt.timedelta(days=3), "10m": dt.timedelta(days=5),
+                        "1h": dt.timedelta(days=14), "4h": dt.timedelta(days=45)}
+
+    def _streamer_symbol(self, ticker: str) -> str | None:
+        """dxFeed symbol for candles: the ticker for equities, the front
+        contract's streamer symbol for futures roots."""
+        if not is_futures(ticker):
+            return ticker
+        try:
+            from tastytrade.instruments import Future
+            front = self._front_future_symbol(ticker)
+            if not front:
+                return None
+            fut = _run(Future.get(self.session, [front]))
+            fut = fut[0] if isinstance(fut, list) else fut
+            return fut.streamer_symbol
+        except Exception:
+            return None
+
+    def _candle_closes(self, ticker: str) -> list[float]:
+        """Live candle closes from the dxFeed streamer, oldest first. Returns
+        [] on any failure so callers fall back to Yahoo's delayed bars."""
+        symbol = self._streamer_symbol(ticker)
+        if not symbol:
+            return []
+        lookback = self._CANDLE_LOOKBACK.get(self.timeframe)
+        if lookback is None:
+            return []
+
+        async def fetch() -> list[float]:
+            from tastytrade import DXLinkStreamer
+            from tastytrade.dxfeed import Candle
+            start = dt.datetime.now(dt.timezone.utc) - lookback
+            bars: dict[int, float] = {}
+            async with DXLinkStreamer(self.session) as streamer:
+                await streamer.subscribe_candle([symbol], interval=self.timeframe,
+                                                start_time=start)
+                deadline = asyncio.get_event_loop().time() + 8.0
+                while asyncio.get_event_loop().time() < deadline:
+                    try:
+                        c = await asyncio.wait_for(streamer.get_event(Candle), timeout=1.5)
+                    except asyncio.TimeoutError:
+                        if len(bars) >= 21:   # history flushed; quiet means done
+                            break
+                        continue
+                    if c.close is not None and c.time is not None:
+                        bars[int(c.time)] = float(c.close)
+            return [close for _, close in sorted(bars.items())]
+
+        try:
+            return _run(fetch())
+        except Exception:
+            return []
 
     def _live_quote(self, ticker: str):
         from tastytrade.market_data import get_market_data_by_type
