@@ -289,6 +289,17 @@ def test_providers_accept_timeframe():
     assert p.underlying("SPY").spot > 0  # synthetic ignores timeframe but still works
 
 
+def test_position_suggestions():
+    from scanner.tastytrade_provider import position_suggestion
+
+    assert "CLOSE" in position_suggestion(62.0, 30, True)          # winner: take it
+    assert "TESTED" in position_suggestion(-15.0, 30, True)        # losing short
+    assert "21-DTE" in position_suggestion(20.0, 14, True)         # roll window
+    assert position_suggestion(20.0, 35, True) == "hold"           # healthy, wait
+    assert position_suggestion(None, 5, True) == ""                # no data
+    assert position_suggestion(80.0, 5, False) == ""               # long position
+
+
 def test_universe_filters():
     etfs = filter_universe(DEFAULT_UNIVERSE, include_tags={"etf"})
     assert etfs and all(s.has("etf") for s in etfs)

@@ -303,9 +303,26 @@ class TastytradeProvider(DataProvider):
 # Account positions (read-only)
 # ----------------------------------------------------------------------
 
+def position_suggestion(pct_of_max: float | None, dte: int | None,
+                        is_short: bool) -> str:
+    """Plain-language management call for a position, premium-seller style:
+    take profits at 50% of max, defend when tested, respect the 21-DTE
+    roll/close window (gamma risk grows fast inside it)."""
+    if not is_short or pct_of_max is None:
+        return ""
+    if pct_of_max >= 50:
+        return f"💰 CLOSE — {pct_of_max:.0f}% of max captured"
+    if pct_of_max < 0:
+        return "⚠️ TESTED — mark above entry, manage it"
+    if dte is not None and dte <= 21:
+        return f"⏰ {dte} DTE — inside the 21-DTE roll/close window"
+    return "hold"
+
+
 def get_positions(session) -> list[dict]:
     """Flat, display-ready list of every open position across accounts."""
     from tastytrade import Account
+    today = dt.date.today()
     rows = []
     for acct in _run(Account.get(session)):
         for p in _run(acct.get_positions(session)):
@@ -317,6 +334,17 @@ def get_positions(session) -> list[dict]:
             # For a short option, profit accrues as mark falls toward zero.
             pl = (open_price - mark) * qty * mult if sign < 0 else (mark - open_price) * qty * mult
             pct_of_max = (1 - mark / open_price) * 100 if sign < 0 and open_price > 0 else None
+
+            exp = getattr(p, "expires_at", None)
+            dte = expires = None
+            if exp is not None:
+                exp_date = exp.date() if hasattr(exp, "date") else exp
+                try:
+                    dte = (exp_date - today).days
+                    expires = exp_date.strftime("%m/%d/%Y")
+                except (TypeError, AttributeError):
+                    pass
+
             rows.append({
                 "account": acct.account_number,
                 "symbol": p.symbol,
@@ -327,6 +355,8 @@ def get_positions(session) -> list[dict]:
                 "mark": mark,
                 "pl_open": round(pl, 2),
                 "pct_of_max_profit": round(pct_of_max, 1) if pct_of_max is not None else None,
-                "expires_at": str(getattr(p, "expires_at", "") or ""),
+                "dte": dte,
+                "expires": expires,
+                "suggestion": position_suggestion(pct_of_max, dte, sign < 0),
             })
     return rows

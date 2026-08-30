@@ -256,7 +256,15 @@ with tab_pos:
                 st.write("No open positions.")
             else:
                 pos_df = pd.DataFrame(rows).rename(columns={
-                    "pl_open": "P/L open $", "pct_of_max_profit": "% of max profit"})
+                    "account": "Account", "symbol": "Symbol", "type": "Type",
+                    "direction": "Dir", "qty": "Qty", "open_price": "Open",
+                    "mark": "Mark", "pl_open": "P/L open $",
+                    "pct_of_max_profit": "% of max profit",
+                    "dte": "DTE", "expires": "Expires", "suggestion": "Suggestion"})
+                cols = ["Suggestion", "Symbol", "Dir", "Qty", "Open", "Mark",
+                        "P/L open $", "% of max profit", "DTE", "Expires",
+                        "Type", "Account"]
+                pos_df = pos_df[[c for c in cols if c in pos_df.columns]]
                 st.dataframe(pos_df, use_container_width=True, hide_index=True)
         except Exception as exc:
             st.error(f"Couldn't load positions: {exc}")
