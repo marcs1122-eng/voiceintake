@@ -16,6 +16,30 @@ from scanner.scan import ScanConfig, rank_dips, run_scan
 from scanner.universe import DEFAULT_UNIVERSE, Symbol, filter_universe
 
 st.set_page_config(page_title="Options Income Scanner", page_icon="🎯", layout="wide")
+
+# --- Cloud hosting support -------------------------------------------------
+# On Streamlit Community Cloud, credentials come from st.secrets instead of a
+# local .env; copy them into the environment for the data providers. If a
+# DASHBOARD_PASSWORD secret is set, require it before rendering anything —
+# apps deployed from public repos are publicly reachable, and this dashboard
+# can show live account positions.
+_gate = ""
+try:
+    for _k in ("TASTYTRADE_CLIENT_SECRET", "TASTYTRADE_REFRESH_TOKEN"):
+        if _k in st.secrets:
+            os.environ.setdefault(_k, str(st.secrets[_k]))
+    _gate = str(st.secrets.get("DASHBOARD_PASSWORD", ""))
+except Exception:
+    pass
+if _gate and not st.session_state.get("authed"):
+    pw = st.text_input("Password", type="password")
+    if pw == _gate:
+        st.session_state.authed = True
+        st.rerun()
+    elif pw:
+        st.error("Wrong password.")
+    st.stop()
+
 st.title("🎯 Options Income Scanner")
 st.caption("Cash-secured puts · wheel · iron condors · broken wing butterflies — "
            "stocks **and** ETFs. Estimates at mid; not financial advice.")
