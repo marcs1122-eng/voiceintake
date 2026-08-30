@@ -44,6 +44,7 @@ class CashSecuredPut:
     entry_signals: frozenset = frozenset()   # e.g. {"RSI<=30", "LowerBB", "50SMA"}
     multiplier: float = 100.0                # $ per 1.00 of premium
     margin_estimate: float | None = None     # futures: initial margin per contract
+    rsi_14: float = 50.0                     # underlying's RSI on the scan timeframe
 
     @property
     def is_futures(self) -> bool:
@@ -97,7 +98,8 @@ def build_csps(chain: ChainSnapshot, *, min_dte_ok: bool = True,
                max_spread_pct: float = 0.25,
                min_premium: float = 0.05,
                entry_signals: frozenset = frozenset(),
-               margin_estimate: float | None = None) -> list[CashSecuredPut]:
+               margin_estimate: float | None = None,
+               rsi_14: float = 50.0) -> list[CashSecuredPut]:
     """All OTM puts in the chain that pass liquidity/delta filters."""
     out = []
     t = _t_years(chain.dte)
@@ -126,6 +128,7 @@ def build_csps(chain: ChainSnapshot, *, min_dte_ok: bool = True,
             earnings_before_expiry=earnings_before_expiry,
             entry_signals=entry_signals,
             multiplier=chain.multiplier, margin_estimate=margin_estimate,
+            rsi_14=rsi_14,
         ))
     return out
 

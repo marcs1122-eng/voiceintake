@@ -59,6 +59,11 @@ with st.sidebar:
                           value=TASTY_AVAILABLE, disabled=not TASTY_AVAILABLE,
                           help="Needs TASTYTRADE_CLIENT_SECRET / TASTYTRADE_REFRESH_TOKEN "
                                "in options-scanner/.env — run `python -m scanner.tastytrade_check`")
+    timeframe = st.selectbox(
+        "Signal timeframe (RSI / Bollinger / 50-SMA)",
+        ["1d", "4h", "1h", "10m", "5m"], index=0,
+        help="Daily for swing/wheel entries; drop to 1h–5m to hunt intraday scalp "
+             "setups (oversold bounces at the day's low, etc.)")
     tags = st.multiselect("Universe tags (empty = everything)", ALL_TAGS, default=[])
     watchlist = st.text_input("Watchlist override (comma-separated)", "")
     dte = st.slider("Days to expiration", 0, 90, (7, 45))
@@ -84,18 +89,18 @@ if go:
 
     if demo:
         from scanner.data import SyntheticProvider
-        provider = SyntheticProvider()
+        provider = SyntheticProvider(timeframe=timeframe)
     elif use_tasty:
         try:
             from scanner.tastytrade_provider import TastytradeProvider
-            provider = TastytradeProvider()
+            provider = TastytradeProvider(timeframe=timeframe)
         except Exception as exc:
             st.error(f"tastytrade login failed: {exc}")
             st.stop()
     else:
         try:
             from scanner.data import YFinanceProvider
-            provider = YFinanceProvider()
+            provider = YFinanceProvider(timeframe=timeframe)
         except ImportError:
             st.error("yfinance isn't installed. `pip install -r requirements.txt`, "
                      "or flip on Demo mode.")
@@ -141,9 +146,24 @@ with tab_csp:
     if not result.csps:
         st.write("No puts passed the filters.")
     else:
+        def _day_flag(tk):
+            info = result.infos.get(tk)
+            if info is None:
+                return ""
+            if info.at_day_low:
+                return "AT LOW"
+            if info.at_day_high:
+                return "AT HIGH"
+            return ""
+
         df = pd.DataFrame([{
             "Score": score_csp(c, _tags.get(c.ticker, frozenset()), _cfg),
-            "Ticker": c.ticker, "Spot": round(c.spot, 2), "Expiry": str(c.expiry),
+            "Ticker": c.ticker, "Spot": round(c.spot, 2),
+            "RSI": round(c.rsi_14, 1),
+            "Day Lo": round(result.infos[c.ticker].day_low, 2) if c.ticker in result.infos else None,
+            "Day Hi": round(result.infos[c.ticker].day_high, 2) if c.ticker in result.infos else None,
+            "@Day": _day_flag(c.ticker),
+            "Expiry": str(c.expiry),
             "DTE": c.dte, "Strike": c.strike, "Mid": c.mid,
             "Premium/ct $": round(c.premium),
             "Capital $": round(c.capital),
@@ -203,6 +223,8 @@ with tab_dip:
     else:
         df = pd.DataFrame([{
             "DipScore": d.dip_score, "Ticker": d.ticker, "Spot": round(d.spot, 2),
+            "Day Lo": round(result.infos[d.ticker].day_low, 2) if d.ticker in result.infos else None,
+            "Day Hi": round(result.infos[d.ticker].day_high, 2) if d.ticker in result.infos else None,
             "Day %": d.day_change_pct, "Off 52w high %": d.pct_off_52w_high,
             "RSI(14)": d.rsi_14, "SMA50": round(d.sma_50, 2) if d.sma_50 else None,
             "Lower BB": round(d.boll_lower, 2) if d.boll_lower else None,

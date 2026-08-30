@@ -256,6 +256,39 @@ def test_synthetic_futures_scan():
         assert c.capital == prod.margin_estimate
 
 
+def test_day_low_high_flags():
+    from scanner.data import UnderlyingInfo
+
+    base = dict(ticker="X", day_change_pct=0.0, pct_off_52w_high=-5.0,
+                hist_vol_20d=0.3, rsi_14=50.0, next_earnings=None, expiries=[])
+    at_low = UnderlyingInfo(spot=100.0, day_low=99.8, day_high=104.0, **base)
+    assert at_low.at_day_low and not at_low.at_day_high
+    at_high = UnderlyingInfo(spot=103.9, day_low=99.8, day_high=104.0, **base)
+    assert at_high.at_day_high and not at_high.at_day_low
+    mid = UnderlyingInfo(spot=102.0, day_low=99.8, day_high=104.0, **base)
+    assert not mid.at_day_low and not mid.at_day_high
+    unknown = UnderlyingInfo(spot=102.0, **base)  # no session data yet
+    assert not unknown.at_day_low and not unknown.at_day_high
+
+
+def test_rsi_carried_onto_puts():
+    from scanner.data import SyntheticProvider
+    provider = SyntheticProvider(seed=7)
+    universe = DEFAULT_UNIVERSE[:6]
+    result = run_scan(provider, universe, ScanConfig(min_annualized_pct=0.0))
+    assert result.csps
+    for c in result.csps:
+        assert c.rsi_14 == result.infos[c.ticker].rsi_14
+
+
+def test_providers_accept_timeframe():
+    from scanner.data import SyntheticProvider, TIMEFRAMES
+    assert set(TIMEFRAMES) == {"5m", "10m", "1h", "4h", "1d"}
+    p = SyntheticProvider(timeframe="5m")
+    assert p.timeframe == "5m"
+    assert p.underlying("SPY").spot > 0  # synthetic ignores timeframe but still works
+
+
 def test_universe_filters():
     etfs = filter_universe(DEFAULT_UNIVERSE, include_tags={"etf"})
     assert etfs and all(s.has("etf") for s in etfs)

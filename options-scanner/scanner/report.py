@@ -25,7 +25,7 @@ def _earn_flag(x: bool) -> str:
 
 def csp_rows(csps: list[CashSecuredPut], limit: int = 20) -> list[list[str]]:
     return [[
-        c.ticker, f"{c.spot:.2f}", str(c.expiry), str(c.dte),
+        c.ticker, f"{c.spot:.2f}", f"{c.rsi_14:.0f}", str(c.expiry), str(c.dte),
         f"{c.strike:g}", f"{c.mid:.2f}", f"${c.premium:,.0f}",
         f"{c.roc_pct:.2f}%", f"{c.annualized_pct:.1f}%",
         f"{c.breakeven:.2f}", f"{c.downside_protection_pct:.1f}%",
@@ -35,7 +35,7 @@ def csp_rows(csps: list[CashSecuredPut], limit: int = 20) -> list[list[str]]:
     ] for c in csps[:limit]]
 
 
-CSP_HEADERS = ["Ticker", "Spot", "Expiry", "DTE", "Strike", "Mid", "Prem/ct",
+CSP_HEADERS = ["Ticker", "Spot", "RSI", "Expiry", "DTE", "Strike", "Mid", "Prem/ct",
                "ROC", "Annual", "B/E", "Cushion", "Delta", "P(OTM)", "IV", "OI",
                "Signals", ""]
 

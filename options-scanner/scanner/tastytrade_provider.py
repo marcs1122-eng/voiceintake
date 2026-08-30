@@ -66,8 +66,9 @@ def has_credentials() -> bool:
 
 
 class TastytradeProvider(DataProvider):
-    def __init__(self, session=None):
+    def __init__(self, session=None, timeframe: str = "1d"):
         from tastytrade import Session
+        self.timeframe = timeframe
         if session is None:
             _load_env_file()
             secret = os.environ.get("TASTYTRADE_CLIENT_SECRET")
@@ -89,7 +90,7 @@ class TastytradeProvider(DataProvider):
 
     def _yahoo(self) -> YFinanceProvider:
         if self._yf is None:
-            self._yf = YFinanceProvider()
+            self._yf = YFinanceProvider(timeframe=self.timeframe)
         return self._yf
 
     def underlying(self, ticker: str) -> UnderlyingInfo:
@@ -101,14 +102,22 @@ class TastytradeProvider(DataProvider):
             info = UnderlyingInfo(ticker=ticker, spot=0.0, day_change_pct=0.0,
                                   pct_off_52w_high=0.0, hist_vol_20d=0.0,
                                   rsi_14=50.0)
-        spot = self._live_spot(ticker)
-        if spot:
-            info.spot = spot
+        md = self._live_quote(ticker)
+        if md is not None:
+            if md.mark or md.last:
+                info.spot = float(md.mark or md.last)
+            # today's session extremes, live from tastytrade (like the tasty watchlist)
+            hi = md.day_high_price or md.day_high
+            lo = md.day_low_price or md.day_low
+            if hi:
+                info.day_high = float(hi)
+            if lo:
+                info.day_low = float(lo)
         info.expiries = self._expiries(ticker)
         self._info_cache[ticker] = info
         return info
 
-    def _live_spot(self, ticker: str) -> float | None:
+    def _live_quote(self, ticker: str):
         from tastytrade.market_data import get_market_data_by_type
         try:
             if is_futures(ticker):
@@ -116,10 +125,14 @@ class TastytradeProvider(DataProvider):
                 md = _run(get_market_data_by_type(self.session, futures=[front])) if front else []
             else:
                 md = _run(get_market_data_by_type(self.session, equities=[ticker]))
-            if md and (md[0].mark or md[0].last):
-                return float(md[0].mark or md[0].last)
+            return md[0] if md else None
         except Exception:
-            pass
+            return None
+
+    def _live_spot(self, ticker: str) -> float | None:
+        md = self._live_quote(ticker)
+        if md is not None and (md.mark or md.last):
+            return float(md.mark or md.last)
         return None
 
     # ------------------------------------------------------------------

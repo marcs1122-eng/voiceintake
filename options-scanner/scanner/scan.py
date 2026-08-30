@@ -82,7 +82,7 @@ def run_scan(provider: DataProvider, universe: list[Symbol],
                     max_spread_pct=cfg.max_spread_pct,
                     min_premium=cfg.min_premium,
                     entry_signals=info.entry_signals,
-                    margin_estimate=margin))
+                    margin_estimate=margin, rsi_14=info.rsi_14))
                 ic = build_iron_condor(
                     chain, short_delta=cfg.condor_short_delta,
                     width_pct=cfg.condor_width_pct,

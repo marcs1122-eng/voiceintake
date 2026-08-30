@@ -66,9 +66,20 @@ class UnderlyingInfo:
     rsi_14: float
     next_earnings: dt.date | None = None
     expiries: list[dt.date] = field(default_factory=list)
-    sma_50: float = 0.0            # 50-day simple moving average
-    boll_lower: float = 0.0        # 20-day Bollinger lower band (2σ)
+    sma_50: float = 0.0            # 50-bar simple moving average (on the scan timeframe)
+    boll_lower: float = 0.0        # 20-bar Bollinger lower band, 2σ (on the scan timeframe)
     boll_upper: float = 0.0
+    day_high: float = 0.0          # today's session high
+    day_low: float = 0.0           # today's session low
+
+    @property
+    def at_day_low(self) -> bool:
+        """Within 0.3% of today's low — scalp-entry zone for premium sellers."""
+        return self.day_low > 0 and self.spot <= self.day_low * 1.003
+
+    @property
+    def at_day_high(self) -> bool:
+        return self.day_high > 0 and self.spot >= self.day_high * 0.997
 
     @property
     def entry_signals(self) -> frozenset:
@@ -102,10 +113,24 @@ class DataProvider:
 # Yahoo Finance provider (live data)
 # ---------------------------------------------------------------------------
 
+# Signal timeframe → (yfinance interval, fetch period, pandas resample rule).
+# Yahoo has no native 10m or 4h bars, so those resample from 5m/60m.
+TIMEFRAMES: dict[str, tuple[str, str, str | None]] = {
+    "5m": ("5m", "5d", None),
+    "10m": ("5m", "5d", "10min"),
+    "1h": ("60m", "60d", None),
+    "4h": ("60m", "120d", "4h"),
+    "1d": ("1d", "1y", None),
+}
+
+
 class YFinanceProvider(DataProvider):
-    def __init__(self):
+    def __init__(self, timeframe: str = "1d"):
         import yfinance  # imported lazily so demo mode never needs it
+        if timeframe not in TIMEFRAMES:
+            raise ValueError(f"timeframe must be one of {sorted(TIMEFRAMES)}")
         self._yf = yfinance
+        self.timeframe = timeframe
         self._tickers: dict[str, object] = {}
         self._info_cache: dict[str, UnderlyingInfo] = {}
 
@@ -139,10 +164,27 @@ class YFinanceProvider(DataProvider):
         recent = rets.tail(20)
         hv20 = float(recent.std() * math.sqrt(TRADING_DAYS)) if len(recent) > 2 else 0.0
 
-        rsi = _rsi(close.tail(60).tolist(), 14)
+        last_bar = hist.iloc[-1]
+        day_high = float(last_bar.get("High", 0) or 0)
+        day_low = float(last_bar.get("Low", 0) or 0)
 
-        sma_50 = float(close.tail(50).mean()) if len(close) >= 50 else spot
-        last20 = close.tail(20)
+        # RSI / 50-SMA / Bollinger are computed on the scan timeframe: daily
+        # bars by default, intraday candles (5m/10m/1h/4h) for scalp mode.
+        sig_close = close
+        if self.timeframe != "1d":
+            try:
+                interval, period, resample = TIMEFRAMES[self.timeframe]
+                intraday = t.history(period=period, interval=interval, auto_adjust=True)
+                if not intraday.empty:
+                    sig_close = intraday["Close"]
+                    if resample:
+                        sig_close = sig_close.resample(resample).last().dropna()
+            except Exception:
+                pass  # fall back to daily-bar signals
+
+        rsi = _rsi(sig_close.tail(60).tolist(), 14)
+        sma_50 = float(sig_close.tail(50).mean()) if len(sig_close) >= 50 else spot
+        last20 = sig_close.tail(20)
         if len(last20) >= 20:
             mid = float(last20.mean())
             sd = float(last20.std())
@@ -170,7 +212,8 @@ class YFinanceProvider(DataProvider):
         info = UnderlyingInfo(ticker, spot, day_change, off_high, hv20, rsi,
                               next_earnings, expiries,
                               sma_50=sma_50, boll_lower=boll_lower,
-                              boll_upper=boll_upper)
+                              boll_upper=boll_upper,
+                              day_high=day_high, day_low=day_low)
         self._info_cache[ticker] = info
         return info
 
@@ -232,8 +275,9 @@ class SyntheticProvider(DataProvider):
     """Deterministic fake market. Prices options with Black-Scholes off a
     seeded per-ticker spot/vol, so every screen has realistic-looking data."""
 
-    def __init__(self, seed: int = 7):
+    def __init__(self, seed: int = 7, timeframe: str = "1d"):
         self.seed = seed
+        self.timeframe = timeframe  # accepted for interface parity; synthetic data ignores it
 
     def _rng(self, ticker: str) -> random.Random:
         return random.Random(f"{self.seed}:{ticker}")
@@ -268,6 +312,8 @@ class SyntheticProvider(DataProvider):
             sma_50=round(spot * rng.uniform(0.92, 1.12), 2),
             boll_lower=round(spot * rng.uniform(0.94, 1.01), 2),
             boll_upper=round(spot * rng.uniform(1.03, 1.10), 2),
+            day_high=round(spot * rng.uniform(1.001, 1.03), 2),
+            day_low=round(spot * rng.uniform(0.97, 0.999), 2),
         )
 
     def chain(self, ticker: str, expiry: dt.date) -> ChainSnapshot:
