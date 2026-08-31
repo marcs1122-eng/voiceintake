@@ -300,10 +300,20 @@ def test_position_suggestions():
     assert "50% rule" in position_suggestion(62.0, 30, True, days_held=10)
     assert "CLOSE" in position_suggestion(62.0, 30, True)          # unknown open date → 50% rule
     assert "TESTED" in position_suggestion(-15.0, 30, True, days_held=0)
+    assert position_suggestion(-3.0, 40, True, days_held=2) == "hold"  # few cents against = noise
     assert "21-DTE" in position_suggestion(20.0, 14, True, days_held=10)
     assert position_suggestion(20.0, 35, True, days_held=10) == "hold"
     assert position_suggestion(None, 5, True) == ""                # no data
     assert position_suggestion(80.0, 5, False) == ""               # long position
+
+
+def test_pretty_symbol():
+    from scanner.tastytrade_provider import pretty_symbol
+
+    assert pretty_symbol("NFLX  261120C00085000") == "NFLX 11/20/26 $85 CALL"
+    assert pretty_symbol("QQQ   261016P00700000") == "QQQ 10/16/26 $700 PUT"
+    assert pretty_symbol("./6EZ6 EUUV6 261009P1.15") == "/6EZ6 10/09/26 $1.15 PUT"
+    assert pretty_symbol("AAPL") == "AAPL"  # stock: unchanged
 
 
 def test_universe_filters():

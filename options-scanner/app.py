@@ -44,7 +44,9 @@ st.title("🎯 Options Income Scanner")
 st.caption("Cash-secured puts · wheel · iron condors · broken wing butterflies — "
            "stocks **and** ETFs. Estimates at mid; not financial advice.")
 
-ALL_TAGS = ["etf", "blue-chip", "dividend", "growth", "high-iv", "futures"]
+ALL_TAGS = ["etf", "blue-chip", "dividend", "growth", "high-iv", "futures",
+            "tech", "semis", "financials", "healthcare", "consumer",
+            "industrials", "energy", "materials", "utilities", "reits", "china"]
 
 try:
     from scanner.tastytrade_provider import has_credentials as _tasty_ready
@@ -151,18 +153,35 @@ with tab_plan:
     st.caption(f"The scan, boiled down to actions — generated {pulled}. "
                "Confirm live premiums before entering. Not financial advice.")
 
-    # -- What needs attention in the account first --
+    # -- What needs attention in the account first, grouped by urgency --
     if TASTY_AVAILABLE:
         try:
             from scanner.tastytrade_provider import TastytradeProvider as _TP, get_positions as _gp
-            action_rows = [r for r in _gp(_TP().session)
-                           if r["suggestion"] and r["suggestion"] != "hold"]
-            if action_rows:
-                st.subheader("🔔 Your open positions that need action")
-                for r in action_rows:
-                    st.markdown(f"- **{r['symbol']}** ({r['direction']} {r['qty']:g}): "
-                                f"{r['suggestion']} — open {r['open_price']:g}, "
-                                f"mark {r['mark']:g}, P/L ${r['pl_open']:,.0f}")
+            rows_all = _gp(_TP().session)
+            closes = [r for r in rows_all if "CLOSE" in r["suggestion"]]
+            tested = [r for r in rows_all if "TESTED" in r["suggestion"]]
+            windows = [r for r in rows_all if "DTE" in r["suggestion"]
+                       and "CLOSE" not in r["suggestion"] and "TESTED" not in r["suggestion"]]
+
+            def _pos_line(r):
+                return (f"**{r['display']}** ({r['direction']} {r['qty']:g}) — "
+                        f"open {r['open_price']:g} → mark {r['mark']:g}, "
+                        f"P/L \\${r['pl_open']:,.0f}")
+
+            if closes or tested or windows:
+                st.subheader("🔔 Positions needing action")
+                if closes:
+                    st.success("**Take profits** — hit your ladder:\n\n" +
+                               "\n".join(f"- {_pos_line(r)} · {r['suggestion']}" for r in closes))
+                if tested:
+                    st.error("**Being tested** — decide: defend, roll, or take the loss:\n\n" +
+                             "\n".join(f"- {_pos_line(r)}" for r in tested))
+                if windows:
+                    st.warning("**Inside the 21-DTE window** — roll or close even if healthy:\n\n" +
+                               "\n".join(f"- {_pos_line(r)} · {r['suggestion']}" for r in windows))
+            else:
+                st.subheader("🔔 Positions")
+                st.write("Nothing needs action — everything is inside your rules.")
         except Exception:
             pass
 
@@ -186,26 +205,34 @@ with tab_plan:
         if info is not None and info.at_day_low:
             why.append("at the low of day")
         why_txt = ", ".join(why) if why else "yield + liquidity"
-        st.markdown(
-            f"**SELL {c.ticker} {c.strike:g} put, exp {c.expiry:%m/%d/%Y}** ({c.dte} DTE) — "
-            f"collect **~${c.premium:,.0f}** on ${c.capital:,.0f} "
-            f"{'margin' if c.is_futures else 'cash'} "
-            f"({c.annualized_pct:.0f}% annualized). "
-            f"{c.prob_otm_pct:.0f}% chance it expires worthless; breakeven {c.breakeven:,.2f} "
-            f"({c.downside_protection_pct:.1f}% cushion). "
-            f"*Why now: {why_txt}. Score {s}.*"
-            + (" ⚠️ **Earnings before expiry.**" if c.earnings_before_expiry else ""))
+        with st.container(border=True):
+            head = f"SELL {c.ticker} {c.strike:g} put · exp {c.expiry:%m/%d/%Y} · {c.dte} DTE"
+            if c.earnings_before_expiry:
+                head += " · ⚠️ earnings before expiry"
+            st.markdown(f"#### {head}")
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Credit / contract", f"${c.premium:,.0f}")
+            m2.metric("Annualized", f"{c.annualized_pct:.0f}%")
+            m3.metric("Prob. worthless", f"{c.prob_otm_pct:.0f}%")
+            m4.metric("Breakeven", f"{c.breakeven:,.2f}")
+            st.caption(f"Ties up \\${c.capital:,.0f} "
+                       f"{'margin' if c.is_futures else 'cash'} · "
+                       f"{c.downside_protection_pct:.1f}% cushion · "
+                       f"why now: {why_txt} · score {s}")
 
     # -- One defined-risk idea --
     if result.condors:
         ic = result.condors[0]
-        st.subheader("🦅 Defined-risk alternative")
-        st.markdown(
-            f"**{ic.ticker} iron condor {ic.put_long:g}/{ic.put_short:g} — "
-            f"{ic.call_short:g}/{ic.call_long:g}, exp {ic.expiry:%m/%d/%Y}** ({ic.dte} DTE): "
-            f"collect **${ic.credit_dollars:,.0f}**, risk ${ic.max_loss_dollars:,.0f}, "
-            f"{ic.pop_pct:.0f}% probability of profit. Profits if price stays between "
-            f"{ic.breakeven_low:,.2f} and {ic.breakeven_high:,.2f}.")
+        with st.container(border=True):
+            st.markdown(f"#### 🦅 Defined-risk alternative: {ic.ticker} iron condor · "
+                        f"exp {ic.expiry:%m/%d/%Y} · {ic.dte} DTE")
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Credit", f"${ic.credit_dollars:,.0f}")
+            m2.metric("Max risk", f"${ic.max_loss_dollars:,.0f}")
+            m3.metric("Prob. profit", f"{ic.pop_pct:.0f}%")
+            m4.metric("Profit zone", f"{ic.breakeven_low:,.0f}–{ic.breakeven_high:,.0f}")
+            st.caption(f"Legs: {ic.put_long:g}/{ic.put_short:g} puts — "
+                       f"{ic.call_short:g}/{ic.call_long:g} calls")
 
     st.caption("Exit plan for anything you open: 25% of max on day one, 30% on "
                "day two, then 50% or the 21-DTE window — same rules the "
@@ -320,13 +347,13 @@ with tab_pos:
                 st.write("No open positions.")
             else:
                 pos_df = pd.DataFrame(rows).rename(columns={
-                    "account": "Account", "symbol": "Symbol", "type": "Type",
+                    "account": "Account", "display": "Contract", "symbol": "Symbol", "type": "Type",
                     "direction": "Dir", "qty": "Qty", "open_price": "Open",
                     "mark": "Mark", "pl_open": "P/L open $",
                     "pct_of_max_profit": "% of max profit",
                     "dte": "DTE", "expires": "Expires",
                     "days_held": "Held (days)", "suggestion": "Suggestion"})
-                cols = ["Suggestion", "Symbol", "Dir", "Qty", "Open", "Mark",
+                cols = ["Suggestion", "Contract", "Dir", "Qty", "Open", "Mark",
                         "P/L open $", "% of max profit", "Held (days)", "DTE",
                         "Expires", "Type", "Account"]
                 pos_df = pos_df[[c for c in cols if c in pos_df.columns]]

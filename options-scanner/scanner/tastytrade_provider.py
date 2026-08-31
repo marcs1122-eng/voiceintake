@@ -303,6 +303,31 @@ class TastytradeProvider(DataProvider):
 # Account positions (read-only)
 # ----------------------------------------------------------------------
 
+import re as _re
+
+_OCC_RE = _re.compile(r"^([A-Z0-9]+)\s+(\d{2})(\d{2})(\d{2})([CP])(\d{8})$")
+_FUT_RE = _re.compile(r"^(\.\/[A-Z0-9]+)\s+\S+\s+(\d{2})(\d{2})(\d{2})([CP])([\d.]+)$")
+
+
+def pretty_symbol(raw: str) -> str:
+    """Turn tastytrade option symbols into something readable:
+    'NFLX  261120C00085000' -> 'NFLX 11/20/26 $85 CALL'
+    './6EZ6 EUUV6 261009P1.15' -> '/6EZ6 10/09/26 $1.15 PUT'."""
+    raw = (raw or "").strip()
+    m = _OCC_RE.match(raw)
+    if m:
+        root, yy, mm, dd, cp, k = m.groups()
+        strike = int(k) / 1000
+        kind = "PUT" if cp == "P" else "CALL"
+        return f"{root} {mm}/{dd}/{yy} ${strike:g} {kind}"
+    m = _FUT_RE.match(raw)
+    if m:
+        root, yy, mm, dd, cp, k = m.groups()
+        kind = "PUT" if cp == "P" else "CALL"
+        return f"{root.lstrip('.')} {mm}/{dd}/{yy} ${float(k):g} {kind}"
+    return raw  # stock/unknown: leave as-is
+
+
 def position_suggestion(pct_of_max: float | None, dte: int | None,
                         is_short: bool, days_held: int | None = None) -> str:
     """Plain-language management call for a short option, using Mac's ladder:
@@ -310,8 +335,12 @@ def position_suggestion(pct_of_max: float | None, dte: int | None,
     21-DTE roll/close window, whichever comes first). Defend when tested."""
     if not is_short or pct_of_max is None:
         return ""
-    if pct_of_max < 0:
-        return "⚠️ TESTED — mark above entry, manage it"
+    # Only call it TESTED when the mark is meaningfully above entry (15%+);
+    # a few cents against you is noise, not a signal.
+    if pct_of_max <= -15:
+        return "⚠️ TESTED — mark well above entry, manage it"
+    if pct_of_max < 0 and dte is not None and dte <= 21:
+        return f"⏰ {dte} DTE and slightly against — roll/close window"
     if days_held == 0:
         target, label = 25.0, "day-1 rule (25%)"
     elif days_held == 1:
@@ -362,6 +391,7 @@ def get_positions(session) -> list[dict]:
             rows.append({
                 "account": acct.account_number,
                 "symbol": p.symbol,
+                "display": pretty_symbol(p.symbol),
                 "type": str(p.instrument_type),
                 "direction": "SHORT" if sign < 0 else "LONG",
                 "qty": qty,
