@@ -316,6 +316,50 @@ def test_pretty_symbol():
     assert pretty_symbol("AAPL") == "AAPL"  # stock: unchanged
 
 
+def test_correlation_analysis():
+    import numpy as np
+    import pandas as pd
+    from scanner import correlation as cm
+
+    rng = np.random.default_rng(7)
+    base = rng.normal(0, 1, 80)
+    closes = pd.DataFrame({
+        "A": 100 * np.cumprod(1 + base * 0.01),
+        "B": 100 * np.cumprod(1 + (base * 0.9 + rng.normal(0, 0.3, 80)) * 0.01),  # tracks A
+        "C": 100 * np.cumprod(1 + rng.normal(0, 1, 80) * 0.01),                    # independent
+    })
+    m = cm.corr_matrix(closes)
+    stats = cm.analyze(m)
+    assert m.loc["A", "B"] >= 0.7                       # the clone pair is hot
+    assert ("A", "B", m.loc["A", "B"]) in [(a, b, c) for a, b, c in stats["hot_pairs"]] or \
+           stats["hot_pairs"][0][:2] == ("A", "B")
+    assert abs(m.loc["A", "C"]) < 0.5                   # independent stays cool
+    top = next(iter(stats["avg_by_symbol"]))
+    assert top in ("A", "B")                            # clones lead the avg ranking
+    assert "🟢" in cm.rate_portfolio(0.1) and "🔴" in cm.rate_portfolio(0.7)
+
+
+def test_yahoo_symbol_mapping():
+    from scanner.correlation import yahoo_symbol_for
+    assert yahoo_symbol_for("/ES") == "ES=F"
+    assert yahoo_symbol_for("NDXP") == "^NDX"
+    assert yahoo_symbol_for("SPXW") == "^SPX"
+    assert yahoo_symbol_for("AAPL") == "AAPL"
+    assert yahoo_symbol_for("/6E") == "6E=F"
+
+
+def test_sector_tags_are_equities_only():
+    futs = filter_universe(DEFAULT_UNIVERSE, include_tags={"futures"})
+    sector_tags = {"tech", "semis", "financials", "healthcare", "consumer",
+                   "industrials", "energy", "materials", "utilities", "reits", "china"}
+    for f in futs:
+        assert not (f.tags & sector_tags), f"{f.ticker} carries a sector tag"
+    # memory/semi additions present
+    semis = {s.ticker for s in filter_universe(DEFAULT_UNIVERSE, include_tags={"semis"})}
+    for t in ("WDC", "STX", "MU", "ASML", "MRVL"):
+        assert t in semis
+
+
 def test_universe_filters():
     etfs = filter_universe(DEFAULT_UNIVERSE, include_tags={"etf"})
     assert etfs and all(s.has("etf") for s in etfs)

@@ -141,9 +141,9 @@ m4.metric("Tickers scanned", len(result.infos))
 if result.errors:
     st.warning(f"Skipped (data errors): {', '.join(sorted(result.errors))}")
 
-tab_plan, tab_csp, tab_ic, tab_bwb, tab_dip, tab_pos = st.tabs(
+tab_plan, tab_csp, tab_ic, tab_bwb, tab_dip, tab_pos, tab_corr = st.tabs(
     ["📋 Trade Plan", "📉 Puts / Wheel", "🦅 Iron Condors", "🦋 Broken Wing Flies",
-     "🔻 Quality Dips", "💼 Positions"])
+     "🔻 Quality Dips", "💼 Positions", "🔗 Correlation"])
 
 _tags = {s.ticker: s.tags for s in universe}
 from scanner.scan import score_bwb, score_condor, score_csp  # noqa: E402
@@ -331,6 +331,83 @@ with tab_dip:
         } for d in dips])
         st.dataframe(df, use_container_width=True, hide_index=True)
         st.download_button("Download CSV", df.to_csv(index=False), "dips.csv")
+
+with tab_corr:
+    st.caption("PowerX-style asset correlation for YOUR book: how much your "
+               "positions move together, where you're doubled up, and what "
+               "would actually diversify you. Based on ~3 months of daily closes.")
+    extra = st.text_input("Extra symbols to include (comma-separated, optional)", "",
+                          key="corr_extra")
+    if st.button("🔗 Analyze my positions", key="corr_go"):
+        try:
+            from scanner import correlation as corr_mod
+            unders = []
+            if TASTY_AVAILABLE:
+                from scanner.tastytrade_provider import TastytradeProvider as _TP, get_positions as _gp
+                unders = sorted({r["underlying"] for r in _gp(_TP().session) if r["underlying"]})
+            unders += [t.strip().upper() for t in extra.split(",") if t.strip()]
+            unders = sorted(set(unders))
+            if len(unders) < 2:
+                st.warning("Need at least 2 symbols (connect tastytrade or type some in).")
+            else:
+                with st.spinner(f"Crunching {len(unders)} symbols…"):
+                    div_syms = [y for _, y in corr_mod.DIVERSIFIERS if y not in unders]
+                    closes = corr_mod.fetch_closes(unders + div_syms)
+                    matrix_all = corr_mod.corr_matrix(closes)
+                    held = [u for u in unders if u in matrix_all.columns]
+                    matrix = matrix_all.loc[held, held]
+                    st.session_state.corr = (matrix, matrix_all, held)
+        except Exception as exc:
+            st.error(f"Correlation analysis failed: {exc}")
+
+    if st.session_state.get("corr") is not None:
+        from scanner import correlation as corr_mod
+        matrix, matrix_all, held = st.session_state.corr
+        stats = corr_mod.analyze(matrix)
+
+        st.metric("Book-wide average correlation", f"{stats['portfolio_avg']:.2f}",
+                  help="Average of every pair. 1.0 = everything moves together.")
+        st.markdown(f"**{corr_mod.rate_portfolio(stats['portfolio_avg'])}**")
+
+        if stats["hot_pairs"]:
+            st.error("**Too correlated — these are effectively the same trade:**\n\n" +
+                     "\n".join(f"- {a} ↔ {b}: **{c:.2f}**"
+                               for a, b, c in stats["hot_pairs"][:10]))
+
+        top_heavy = [s for s, v in stats["avg_by_symbol"].items() if v >= 0.45][:5]
+        if top_heavy:
+            st.warning("**Most correlated to the rest of your book** (trimming these "
+                       "reduces risk fastest): " + ", ".join(
+                           f"{s} ({stats['avg_by_symbol'][s]:.2f})" for s in top_heavy))
+
+        # Diversification ideas: candidates with the lowest avg corr to the book
+        ideas = []
+        for label, ysym in corr_mod.DIVERSIFIERS:
+            if ysym in matrix_all.columns and ysym not in held:
+                vals = [matrix_all.loc[ysym, h] for h in held
+                        if h in matrix_all.columns and not pd.isna(matrix_all.loc[ysym, h])]
+                if vals:
+                    ideas.append((label, sum(vals) / len(vals)))
+        ideas.sort(key=lambda t: t[1])
+        if ideas:
+            st.success("**Where to diversify** — lowest correlation to your current book:\n\n" +
+                       "\n".join(f"- {label}: avg corr **{v:.2f}**"
+                                 for label, v in ideas[:5]))
+
+        def _heat(v):
+            if pd.isna(v):
+                return ""
+            if v >= 0.7:
+                return "background-color: rgba(220, 60, 40, 0.55)"
+            if v >= 0.4:
+                return "background-color: rgba(230, 150, 40, 0.4)"
+            if v <= -0.2:
+                return "background-color: rgba(40, 160, 90, 0.45)"
+            return "background-color: rgba(120, 160, 200, 0.15)"
+
+        st.markdown("**Correlation matrix** (red = moves together, green = offsets):")
+        st.dataframe(matrix.style.map(_heat).format("{:.2f}"),
+                     use_container_width=True)
 
 with tab_pos:
     st.caption("Live open positions from your tastytrade account (read-only). "

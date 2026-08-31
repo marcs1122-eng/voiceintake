@@ -77,6 +77,12 @@ DEFAULT_UNIVERSE: list[Symbol] = [
     _s("AMAT", "semis", "growth"), _s("LRCX", "semis", "growth"),
     _s("KLAC", "semis", "growth"), _s("ARM", "semis", "growth", "high-iv"),
     _s("SMCI", "semis", "high-iv"), _s("ON", "semis", "high-iv"),
+    _s("ASML", "semis", "blue-chip"), _s("MRVL", "semis", "growth", "high-iv"),
+    _s("ADI", "semis", "dividend"), _s("NXPI", "semis", "dividend"),
+    _s("MCHP", "semis", "dividend", "high-iv"),
+    # memory
+    _s("WDC", "semis", "high-iv"), _s("STX", "semis", "dividend", "high-iv"),
+    _s("IONQ", "tech", "high-iv"),
     # --- Financials ---
     _s("JPM", "financials", "blue-chip", "dividend"), _s("BAC", "financials", "blue-chip", "dividend"),
     _s("WFC", "financials", "dividend"), _s("C", "financials", "dividend"),
@@ -148,10 +154,12 @@ DEFAULT_UNIVERSE: list[Symbol] = [
     _s("BIDU", "china", "high-iv"),
     # --- Liquid futures (options on futures; chains require the
     #     tastytrade provider — Yahoo only feeds their technicals/dips) ---
-    _s("/ES", "futures", "blue-chip"), _s("/NQ", "futures", "blue-chip"),
-    _s("/CL", "futures", "energy", "high-iv"), _s("/GC", "futures"),
+    #     Futures carry ONLY the `futures` tag (+ high-iv where apt) so
+    #     sector filters like `energy` return equities only.
+    _s("/ES", "futures"), _s("/NQ", "futures"),
+    _s("/CL", "futures", "high-iv"), _s("/GC", "futures"),
     _s("/SI", "futures", "high-iv"), _s("/ZB", "futures"),
-    _s("/ZN", "futures"), _s("/NG", "futures", "energy", "high-iv"),
+    _s("/ZN", "futures"), _s("/NG", "futures", "high-iv"),
     _s("/ZC", "futures"), _s("/ZS", "futures"), _s("/ZW", "futures"),
     _s("/6E", "futures"),
 ]

@@ -392,6 +392,7 @@ def get_positions(session) -> list[dict]:
                 "account": acct.account_number,
                 "symbol": p.symbol,
                 "display": pretty_symbol(p.symbol),
+                "underlying": str(getattr(p, "underlying_symbol", "") or p.symbol.split()[0]),
                 "type": str(p.instrument_type),
                 "direction": "SHORT" if sign < 0 else "LONG",
                 "qty": qty,
