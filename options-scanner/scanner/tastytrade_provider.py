@@ -146,9 +146,10 @@ class TastytradeProvider(DataProvider):
         except Exception:
             return None
 
-    def _candle_closes(self, ticker: str) -> list[float]:
-        """Live candle closes from the dxFeed streamer, oldest first. Returns
-        [] on any failure so callers fall back to Yahoo's delayed bars."""
+    def _candle_bars(self, ticker: str) -> list[tuple[float, float, float]]:
+        """Live (high, low, close) candles from the dxFeed streamer, oldest
+        first. Returns [] on any failure so callers fall back to Yahoo's
+        delayed bars."""
         symbol = self._streamer_symbol(ticker)
         if not symbol:
             return []
@@ -156,11 +157,11 @@ class TastytradeProvider(DataProvider):
         if lookback is None:
             return []
 
-        async def fetch() -> list[float]:
+        async def fetch() -> list[tuple[float, float, float]]:
             from tastytrade import DXLinkStreamer
             from tastytrade.dxfeed import Candle
             start = dt.datetime.now(dt.timezone.utc) - lookback
-            bars: dict[int, float] = {}
+            bars: dict[int, tuple[float, float, float]] = {}
             async with DXLinkStreamer(self.session) as streamer:
                 await streamer.subscribe_candle([symbol], interval=self.timeframe,
                                                 start_time=start)
@@ -173,13 +174,38 @@ class TastytradeProvider(DataProvider):
                             break
                         continue
                     if c.close is not None and c.time is not None:
-                        bars[int(c.time)] = float(c.close)
-            return [close for _, close in sorted(bars.items())]
+                        close = float(c.close)
+                        high = float(c.high) if c.high is not None else close
+                        low = float(c.low) if c.low is not None else close
+                        bars[int(c.time)] = (high, low, close)
+            return [bar for _, bar in sorted(bars.items())]
 
         try:
             return _run(fetch())
         except Exception:
             return []
+
+    def _candle_closes(self, ticker: str) -> list[float]:
+        return [c for _, _, c in self._candle_bars(ticker)]
+
+    def scalp_snapshot(self, ticker: str) -> tuple[list[tuple[float, float, float]], float, float, float]:
+        """(intraday bars, live spot, day low, day high) for the scalp radar —
+        candles + one quote, no option-chain calls, so the sweep stays fast."""
+        bars = self._candle_bars(ticker)
+        spot = day_low = day_high = 0.0
+        md = self._live_quote(ticker)
+        if md is not None:
+            if md.mark or md.last:
+                spot = float(md.mark or md.last)
+            hi = md.day_high_price or md.day_high
+            lo = md.day_low_price or md.day_low
+            if hi:
+                day_high = float(hi)
+            if lo:
+                day_low = float(lo)
+        if not spot and bars:
+            spot = bars[-1][2]
+        return bars, spot, day_low, day_high
 
     def _live_quote(self, ticker: str):
         from tastytrade.market_data import get_market_data_by_type

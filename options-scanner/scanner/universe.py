@@ -189,6 +189,23 @@ DEFAULT_UNIVERSE: list[Symbol] = [
 ]
 
 
+# Tags that explicitly ask for futures. Anything else — sector tags like
+# `energy`, style tags like `high-iv` — is an equities/ETF request, and
+# futures must stay out of it even when they share a style tag.
+FUTURES_TAGS = {"futures", "fut-liquid", "micro", "uncorrelated", "fut-index",
+                "fut-energy", "fut-metals", "fut-rates", "fut-fx", "fut-ags",
+                "fut-crypto"}
+
+
+def select_by_tags(universe: list[Symbol], tags: set[str]) -> list[Symbol]:
+    """Tag filter with the futures guard: /CL only shows up when a futures
+    tag was picked, never because `energy` or `high-iv` overlaps."""
+    out = filter_universe(universe, include_tags=set(tags))
+    if not (set(tags) & FUTURES_TAGS):
+        out = [s for s in out if "futures" not in s.tags]
+    return out
+
+
 def filter_universe(universe: list[Symbol], include_tags: set[str] | None = None,
                     exclude_tags: set[str] | None = None,
                     tickers: set[str] | None = None) -> list[Symbol]:

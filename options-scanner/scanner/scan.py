@@ -109,6 +109,22 @@ def run_scan(provider: DataProvider, universe: list[Symbol],
     return result
 
 
+def dedupe_csps(csps: list[CashSecuredPut], per_expiry: int = 1) -> list[CashSecuredPut]:
+    """Collapse the strike ladder: keep the top `per_expiry` strikes per
+    (ticker, expiry). The scanner naturally emits every strike in the delta
+    band — eight /ES rows at one expiry is one trade idea, not eight.
+    Assumes `csps` is already sorted best-first."""
+    counts: dict[tuple, int] = {}
+    out = []
+    for c in csps:
+        key = (c.ticker, c.expiry)
+        n = counts.get(key, 0)
+        if n < per_expiry:
+            out.append(c)
+            counts[key] = n + 1
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Scoring — a single 0-100 number so "best trades today" means something.
 # ---------------------------------------------------------------------------

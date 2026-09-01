@@ -12,8 +12,8 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from scanner.scan import ScanConfig, rank_dips, run_scan
-from scanner.universe import DEFAULT_UNIVERSE, Symbol, filter_universe
+from scanner.scan import ScanConfig, dedupe_csps, rank_dips, run_scan
+from scanner.universe import DEFAULT_UNIVERSE, Symbol, filter_universe, select_by_tags
 
 st.set_page_config(page_title="Options Income Scanner", page_icon="🎯", layout="wide")
 
@@ -47,10 +47,10 @@ st.caption("Cash-secured puts · wheel · iron condors · broken wing butterflie
 ALL_TAGS = [
     # style / quality
     "etf", "blue-chip", "dividend", "growth", "high-iv",
-    # equity sectors
+    # equity sectors (equities/ETFs only — futures never match these)
     "tech", "semis", "financials", "healthcare", "consumer",
     "industrials", "energy", "materials", "utilities", "reits", "china",
-    # futures
+    # futures (the only tags that bring futures into a scan)
     "futures", "fut-liquid", "uncorrelated", "micro", "fut-index",
     "fut-energy", "fut-metals", "fut-rates", "fut-fx", "fut-ags", "fut-crypto",
 ]
@@ -73,7 +73,9 @@ with st.sidebar:
         ["1d", "4h", "1h", "10m", "5m"], index=0,
         help="Daily for swing/wheel entries; drop to 1h–5m to hunt intraday scalp "
              "setups (oversold bounces at the day's low, etc.)")
-    tags = st.multiselect("Universe tags (empty = everything)", ALL_TAGS, default=[])
+    tags = st.multiselect("Universe tags (empty = everything)", ALL_TAGS, default=[],
+                          help="Sector/style tags scan equities & ETFs only. "
+                               "Pick a futures tag (futures, fut-energy, …) to scan futures.")
     watchlist = st.text_input("Watchlist override (comma-separated)", "")
     dte = st.slider("Days to expiration", 0, 90, (7, 45))
     delta = st.slider("Put delta range", 0.05, 0.50, (0.10, 0.35), step=0.01)
@@ -94,7 +96,7 @@ if go:
         universe = filter_universe(universe, tickers=wanted)
         universe += [Symbol(t, frozenset()) for t in sorted(wanted - known)]
     if tags:
-        universe = filter_universe(universe, include_tags=set(tags))
+        universe = select_by_tags(universe, set(tags))
 
     if demo:
         from scanner.data import SyntheticProvider
@@ -132,123 +134,140 @@ if go:
     scan_time = datetime.now(ZoneInfo("America/New_York"))
     st.session_state.result = (result, rank_dips(result.infos, universe), universe, scan_time)
 
-if st.session_state.result is None:
-    st.info("Set your filters in the sidebar and hit **Run scan**.")
-    st.stop()
+have_result = st.session_state.result is not None
+result = dips = universe = scan_time = None
+pulled = ""
+if have_result:
+    result, dips, universe, scan_time = st.session_state.result
+    pulled = scan_time.strftime("%m/%d %I:%M:%S %p ET")
+    st.caption(f"🕐 Data pulled: **{pulled}** — snapshot at scan time; hit Run scan to refresh.")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Put candidates", len(result.csps))
+    m2.metric("Iron condors", len(result.condors))
+    m3.metric("Broken wing flies", len(result.bwbs))
+    m4.metric("Tickers scanned", len(result.infos))
+    if result.errors:
+        st.warning(f"Skipped (data errors): {', '.join(sorted(result.errors))}")
+else:
+    st.info("Set your filters in the sidebar and hit **Run scan** — or jump "
+            "straight to **⚡ Scalp** for the intraday futures radar (it runs "
+            "on its own).")
 
-result, dips, universe, scan_time = st.session_state.result
-pulled = scan_time.strftime("%m/%d %I:%M:%S %p ET")
-st.caption(f"🕐 Data pulled: **{pulled}** — snapshot at scan time; hit Run scan to refresh.")
+NEED_SCAN = "Run the income scan first (sidebar → **Run scan**)."
 
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("Put candidates", len(result.csps))
-m2.metric("Iron condors", len(result.condors))
-m3.metric("Broken wing flies", len(result.bwbs))
-m4.metric("Tickers scanned", len(result.infos))
-if result.errors:
-    st.warning(f"Skipped (data errors): {', '.join(sorted(result.errors))}")
-
-tab_plan, tab_csp, tab_ic, tab_bwb, tab_dip, tab_pos, tab_corr = st.tabs(
+tab_plan, tab_csp, tab_ic, tab_bwb, tab_dip, tab_scalp, tab_pos, tab_corr = st.tabs(
     ["📋 Trade Plan", "📉 Puts / Wheel", "🦅 Iron Condors", "🦋 Broken Wing Flies",
-     "🔻 Quality Dips", "💼 Positions", "🔗 Correlation"])
+     "🔻 Quality Dips", "⚡ Scalp", "💼 Positions", "🔗 Correlation"])
 
-_tags = {s.ticker: s.tags for s in universe}
+_tags = {s.ticker: s.tags for s in universe} if have_result else {}
 from scanner.scan import score_bwb, score_condor, score_csp  # noqa: E402
 _cfg = ScanConfig()
 
 with tab_plan:
-    st.caption(f"The scan, boiled down to actions — generated {pulled}. "
-               "Confirm live premiums before entering. Not financial advice.")
+    if not have_result:
+        st.info(NEED_SCAN)
+    else:
+        st.caption(f"The scan, boiled down to actions — generated {pulled}. "
+                   "Confirm live premiums before entering. Not financial advice.")
 
-    # -- What needs attention in the account first, grouped by urgency --
-    if TASTY_AVAILABLE:
-        try:
-            from scanner.tastytrade_provider import TastytradeProvider as _TP, get_positions as _gp
-            rows_all = _gp(_TP().session)
-            closes = [r for r in rows_all if "CLOSE" in r["suggestion"]]
-            tested = [r for r in rows_all if "TESTED" in r["suggestion"]]
-            windows = [r for r in rows_all if "DTE" in r["suggestion"]
-                       and "CLOSE" not in r["suggestion"] and "TESTED" not in r["suggestion"]]
+        # -- What needs attention in the account first, grouped by urgency --
+        if TASTY_AVAILABLE:
+            try:
+                from scanner.tastytrade_provider import TastytradeProvider as _TP, get_positions as _gp
+                rows_all = _gp(_TP().session)
+                closes = [r for r in rows_all if "CLOSE" in r["suggestion"]]
+                tested = [r for r in rows_all if "TESTED" in r["suggestion"]]
+                windows = [r for r in rows_all if "DTE" in r["suggestion"]
+                           and "CLOSE" not in r["suggestion"] and "TESTED" not in r["suggestion"]]
 
-            def _pos_line(r):
-                return (f"**{r['display']}** ({r['direction']} {r['qty']:g}) — "
-                        f"open {r['open_price']:g} → mark {r['mark']:g}, "
-                        f"P/L \\${r['pl_open']:,.0f}")
+                def _pos_line(r):
+                    return (f"**{r['display']}** ({r['direction']} {r['qty']:g}) — "
+                            f"open {r['open_price']:g} → mark {r['mark']:g}, "
+                            f"P/L \\${r['pl_open']:,.0f}")
 
-            if closes or tested or windows:
-                st.subheader("🔔 Positions needing action")
-                if closes:
-                    st.success("**Take profits** — hit your ladder:\n\n" +
-                               "\n".join(f"- {_pos_line(r)} · {r['suggestion']}" for r in closes))
-                if tested:
-                    st.error("**Being tested** — decide: defend, roll, or take the loss:\n\n" +
-                             "\n".join(f"- {_pos_line(r)}" for r in tested))
-                if windows:
-                    st.warning("**Inside the 21-DTE window** — roll or close even if healthy:\n\n" +
-                               "\n".join(f"- {_pos_line(r)} · {r['suggestion']}" for r in windows))
-            else:
-                st.subheader("🔔 Positions")
-                st.write("Nothing needs action — everything is inside your rules.")
-        except Exception:
-            pass
+                if closes or tested or windows:
+                    st.subheader("🔔 Positions needing action")
+                    if closes:
+                        st.success("**Take profits** — hit your ladder:\n\n" +
+                                   "\n".join(f"- {_pos_line(r)} · {r['suggestion']}" for r in closes))
+                    if tested:
+                        st.error("**Being tested** — decide: defend, roll, or take the loss:\n\n" +
+                                 "\n".join(f"- {_pos_line(r)}" for r in tested))
+                    if windows:
+                        st.warning("**Inside the 21-DTE window** — roll or close even if healthy:\n\n" +
+                                   "\n".join(f"- {_pos_line(r)} · {r['suggestion']}" for r in windows))
+                else:
+                    st.subheader("🔔 Positions")
+                    st.write("Nothing needs action — everything is inside your rules.")
+            except Exception:
+                pass
 
-    # -- Best new trades: top-scored put per ticker, quality bar applied --
-    st.subheader("🎯 Recommended trades to put on")
-    seen, picks = set(), []
-    for c in result.csps:
-        s = score_csp(c, _tags.get(c.ticker, frozenset()), _cfg)
-        if c.ticker in seen or s < 70 or c.prob_otm_pct < 65:
-            continue
-        seen.add(c.ticker)
-        picks.append((s, c))
-        if len(picks) == 3:
-            break
-    if not picks:
-        st.write("Nothing clears the quality bar right now (score ≥ 70 and "
-                 "P(OTM) ≥ 65%). That's an answer too — don't force it.")
-    for s, c in picks:
-        why = list(sorted(c.entry_signals))
-        info = result.infos.get(c.ticker)
-        if info is not None and info.at_day_low:
-            why.append("at the low of day")
-        why_txt = ", ".join(why) if why else "yield + liquidity"
-        with st.container(border=True):
-            head = f"SELL {c.ticker} {c.strike:g} put · exp {c.expiry:%m/%d/%Y} · {c.dte} DTE"
-            if c.earnings_before_expiry:
-                head += " · ⚠️ earnings before expiry"
-            st.markdown(f"#### {head}")
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Credit / contract", f"${c.premium:,.0f}")
-            m2.metric("Annualized", f"{c.annualized_pct:.0f}%")
-            m3.metric("Prob. worthless", f"{c.prob_otm_pct:.0f}%")
-            m4.metric("Breakeven", f"{c.breakeven:,.2f}")
-            st.caption(f"Ties up \\${c.capital:,.0f} "
-                       f"{'margin' if c.is_futures else 'cash'} · "
-                       f"{c.downside_protection_pct:.1f}% cushion · "
-                       f"why now: {why_txt} · score {s}")
+        # -- Best new trades: top-scored put per ticker, quality bar applied --
+        st.subheader("🎯 Recommended trades to put on")
+        seen, picks = set(), []
+        for c in result.csps:
+            s = score_csp(c, _tags.get(c.ticker, frozenset()), _cfg)
+            if c.ticker in seen or s < 70 or c.prob_otm_pct < 65:
+                continue
+            seen.add(c.ticker)
+            picks.append((s, c))
+            if len(picks) == 3:
+                break
+        if not picks:
+            st.write("Nothing clears the quality bar right now (score ≥ 70 and "
+                     "P(OTM) ≥ 65%). That's an answer too — don't force it.")
+        for s, c in picks:
+            why = list(sorted(c.entry_signals))
+            info = result.infos.get(c.ticker)
+            if info is not None and info.at_day_low:
+                why.append("at the low of day")
+            why_txt = ", ".join(why) if why else "yield + liquidity"
+            with st.container(border=True):
+                head = f"SELL {c.ticker} {c.strike:g} put · exp {c.expiry:%m/%d/%Y} · {c.dte} DTE"
+                if c.earnings_before_expiry:
+                    head += " · ⚠️ earnings before expiry"
+                st.markdown(f"#### {head}")
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Credit / contract", f"${c.premium:,.0f}")
+                m2.metric("Annualized", f"{c.annualized_pct:.0f}%")
+                m3.metric("Prob. worthless", f"{c.prob_otm_pct:.0f}%")
+                m4.metric("Breakeven", f"{c.breakeven:,.2f}")
+                st.caption(f"Ties up \\${c.capital:,.0f} "
+                           f"{'margin' if c.is_futures else 'cash'} · "
+                           f"{c.downside_protection_pct:.1f}% cushion · "
+                           f"why now: {why_txt} · score {s}")
 
-    # -- One defined-risk idea --
-    if result.condors:
-        ic = result.condors[0]
-        with st.container(border=True):
-            st.markdown(f"#### 🦅 Defined-risk alternative: {ic.ticker} iron condor · "
-                        f"exp {ic.expiry:%m/%d/%Y} · {ic.dte} DTE")
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Credit", f"${ic.credit_dollars:,.0f}")
-            m2.metric("Max risk", f"${ic.max_loss_dollars:,.0f}")
-            m3.metric("Prob. profit", f"{ic.pop_pct:.0f}%")
-            m4.metric("Profit zone", f"{ic.breakeven_low:,.0f}–{ic.breakeven_high:,.0f}")
-            st.caption(f"Legs: {ic.put_long:g}/{ic.put_short:g} puts — "
-                       f"{ic.call_short:g}/{ic.call_long:g} calls")
+        # -- One defined-risk idea --
+        if result.condors:
+            ic = result.condors[0]
+            with st.container(border=True):
+                st.markdown(f"#### 🦅 Defined-risk alternative: {ic.ticker} iron condor · "
+                            f"exp {ic.expiry:%m/%d/%Y} · {ic.dte} DTE")
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Credit", f"${ic.credit_dollars:,.0f}")
+                m2.metric("Max risk", f"${ic.max_loss_dollars:,.0f}")
+                m3.metric("Prob. profit", f"{ic.pop_pct:.0f}%")
+                m4.metric("Profit zone", f"{ic.breakeven_low:,.0f}–{ic.breakeven_high:,.0f}")
+                st.caption(f"Legs: {ic.put_long:g}/{ic.put_short:g} puts — "
+                           f"{ic.call_short:g}/{ic.call_long:g} calls")
 
-    st.caption("Exit plan for anything you open: 25% of max on day one, 30% on "
-               "day two, then 50% or the 21-DTE window — same rules the "
-               "Positions tab enforces.")
+        st.caption("Exit plan for anything you open: 25% of max on day one, 30% on "
+                   "day two, then 50% or the 21-DTE window — same rules the "
+                   "Positions tab enforces.")
 
 with tab_csp:
-    if not result.csps:
+    if not have_result:
+        st.info(NEED_SCAN)
+    elif not result.csps:
         st.write("No puts passed the filters.")
     else:
+        show_all = st.toggle(
+            "Show every strike in the delta band", value=False,
+            help="Off = the single best-scored strike per ticker & expiry. "
+                 "On = the full strike ladder (eight /ES rows at one expiry "
+                 "is the same trade at different deltas).")
+        csps = result.csps if show_all else dedupe_csps(result.csps)
+
         def _day_flag(tk):
             info = result.infos.get(tk)
             if info is None:
@@ -279,12 +298,14 @@ with tab_csp:
             "IV %": round(c.iv * 100), "OI": c.open_interest,
             "Signals": " + ".join(sorted(c.entry_signals)),
             "Earnings⚠": c.earnings_before_expiry,
-        } for c in result.csps])
+        } for c in csps])
         st.dataframe(df, use_container_width=True, hide_index=True)
         st.download_button("Download CSV", df.to_csv(index=False), "csps.csv")
 
 with tab_ic:
-    if not result.condors:
+    if not have_result:
+        st.info(NEED_SCAN)
+    elif not result.condors:
         st.write("No condors passed the filters.")
     else:
         df = pd.DataFrame([{
@@ -301,7 +322,9 @@ with tab_ic:
         st.download_button("Download CSV", df.to_csv(index=False), "condors.csv")
 
 with tab_bwb:
-    if not result.bwbs:
+    if not have_result:
+        st.info(NEED_SCAN)
+    elif not result.bwbs:
         st.write("No broken wing butterflies passed the filters.")
     else:
         df = pd.DataFrame([{
@@ -319,25 +342,108 @@ with tab_bwb:
         st.download_button("Download CSV", df.to_csv(index=False), "bwbs.csv")
 
 with tab_dip:
-    st.caption("Quality names most washed out — candidates to start the wheel on. "
-               "DipScore blends today's drop, distance off the 52-week high, RSI, "
-               "and the entry signals: RSI≤30, lower Bollinger Band touch, 50-SMA support.")
-    if not dips:
-        st.write("No dip candidates.")
+    if not have_result:
+        st.info(NEED_SCAN)
     else:
-        df = pd.DataFrame([{
-            "DipScore": d.dip_score, "Ticker": d.ticker, "Spot": round(d.spot, 2),
-            "Day Lo": round(result.infos[d.ticker].day_low, 2) if d.ticker in result.infos else None,
-            "Day Hi": round(result.infos[d.ticker].day_high, 2) if d.ticker in result.infos else None,
-            "Day %": d.day_change_pct, "Off 52w high %": d.pct_off_52w_high,
-            "RSI(14)": d.rsi_14, "SMA50": round(d.sma_50, 2) if d.sma_50 else None,
-            "Lower BB": round(d.boll_lower, 2) if d.boll_lower else None,
-            "Signals": " + ".join(sorted(d.entry_signals)),
-            "Tags": ", ".join(sorted(d.tags)),
-            "Next earnings": str(d.next_earnings) if d.next_earnings else "—",
-        } for d in dips])
-        st.dataframe(df, use_container_width=True, hide_index=True)
-        st.download_button("Download CSV", df.to_csv(index=False), "dips.csv")
+        st.caption("Quality names most washed out — candidates to start the wheel on. "
+                   "DipScore blends today's drop, distance off the 52-week high, RSI, "
+                   "and the entry signals: RSI≤30, lower Bollinger Band touch, 50-SMA support.")
+        if not dips:
+            st.write("No dip candidates.")
+        else:
+            df = pd.DataFrame([{
+                "DipScore": d.dip_score, "Ticker": d.ticker, "Spot": round(d.spot, 2),
+                "Day Lo": round(result.infos[d.ticker].day_low, 2) if d.ticker in result.infos else None,
+                "Day Hi": round(result.infos[d.ticker].day_high, 2) if d.ticker in result.infos else None,
+                "Day %": d.day_change_pct, "Off 52w high %": d.pct_off_52w_high,
+                "RSI(14)": d.rsi_14, "SMA50": round(d.sma_50, 2) if d.sma_50 else None,
+                "Lower BB": round(d.boll_lower, 2) if d.boll_lower else None,
+                "Signals": " + ".join(sorted(d.entry_signals)),
+                "Tags": ", ".join(sorted(d.tags)),
+                "Next earnings": str(d.next_earnings) if d.next_earnings else "—",
+            } for d in dips])
+            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.download_button("Download CSV", df.to_csv(index=False), "dips.csv")
+
+with tab_scalp:
+    from scanner.scalp import SCALP_FUTURES, run_scalp_scan
+    st.caption("Quick day-trade radar on the deepest futures — runs on its own, "
+               "no option chains. LONG/SHORT SCALP = 2 of 3: RSI extreme, "
+               "outside the 2σ band, at the session low/high. Signals, not "
+               "orders — confirm on the tasty DOM before entering.")
+    c1, c2, c3 = st.columns([1, 2, 1])
+    scalp_tf = c1.selectbox("Timeframe", ["5m", "10m", "1h"], index=0, key="scalp_tf")
+    scalp_syms = c2.multiselect("Products", SCALP_FUTURES, default=SCALP_FUTURES,
+                                key="scalp_syms")
+    scalp_go = c3.button("⚡ Run scalp scan", type="primary", use_container_width=True)
+
+    if scalp_go:
+        source = "demo" if demo else ("tasty" if use_tasty else "yahoo")
+        sbar = st.progress(0.0, text="Reading candles…")
+
+        def _sprog(i, n, tk):
+            sbar.progress((i + 1) / n, text=f"{tk} ({i + 1}/{n})")
+
+        try:
+            rows, errs = run_scalp_scan(scalp_tf, scalp_syms, source=source,
+                                        progress=_sprog)
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            st.session_state.scalp = (rows, errs,
+                                      datetime.now(ZoneInfo("America/New_York")))
+        except Exception as exc:
+            st.error(f"Scalp scan failed: {exc}")
+        sbar.empty()
+
+    if st.session_state.get("scalp"):
+        rows, errs, t = st.session_state.scalp
+        st.caption(f"🕐 Pulled **{t.strftime('%m/%d %I:%M:%S %p ET')}** — "
+                   "futures move fast; re-run before acting.")
+        if errs:
+            st.warning("No data for: " + ", ".join(f"{k} ({v})" for k, v in errs.items()))
+        if not rows:
+            st.write("No products returned data.")
+        else:
+            hot = [r for r in rows if r.bias in ("LONG SCALP", "SHORT SCALP")]
+            if hot:
+                for r in hot:
+                    icon = "🟢" if r.bias == "LONG SCALP" else "🔴"
+                    st.markdown(
+                        f"{icon} **{r.ticker} {r.bias}** — {r.spot:g}, "
+                        f"{' + '.join(sorted(r.signals))} · stop {r.stop:,.2f} · "
+                        f"target {r.target:,.2f} (20-bar mean) · "
+                        f"risk \\${r.risk_dollars:,.0f}/ct, reward \\${r.reward_dollars:,.0f}/ct "
+                        f"(size down with {r.micro})")
+            else:
+                st.write("**Nothing stretched right now** — no product is 2-of-3. "
+                         "That's the answer: don't force a scalp in the middle of the range.")
+
+            _bias_icon = {"LONG SCALP": "🟢 LONG SCALP", "SHORT SCALP": "🔴 SHORT SCALP",
+                          "lean long": "↗ lean long", "lean short": "↘ lean short",
+                          "no edge": "—"}
+            df = pd.DataFrame([{
+                "Setup": _bias_icon.get(r.bias, r.bias),
+                "Ticker": r.ticker, "Name": r.name,
+                "Spot": round(r.spot, 2),
+                "Day Lo": round(r.day_low, 2) if r.day_low else None,
+                "Day Hi": round(r.day_high, 2) if r.day_high else None,
+                "Range %": round(r.range_pos_pct) if r.range_pos_pct is not None else None,
+                "RSI": round(r.rsi, 1),
+                "Stretch σ": round(r.stretch_sigma, 2),
+                "Lower BB": round(r.boll_lower, 2), "Upper BB": round(r.boll_upper, 2),
+                "20-bar mean": round(r.mid_band, 2),
+                f"ATR ({scalp_tf})": round(r.atr, 2),
+                "Stop": round(r.stop, 2) if r.stop is not None else None,
+                "Target": round(r.target, 2) if r.target is not None else None,
+                "Risk $/ct": round(r.risk_dollars) if r.risk_dollars is not None else None,
+                "$/point": r.per_point, "Micro": r.micro,
+                "Signals": " + ".join(sorted(r.signals)),
+            } for r in rows])
+            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.caption("Range % — where price sits in today's range (0 = at the low, "
+                       "100 = at the high). Stretch σ — distance from the 20-bar mean "
+                       "in standard deviations; ±2 is at the bands. Stop = 0.6×ATR "
+                       "past the session extreme; target = the 20-bar mean.")
 
 with tab_corr:
     st.caption("PowerX-style asset correlation for YOUR book: how much your "

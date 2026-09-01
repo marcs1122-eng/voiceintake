@@ -400,3 +400,122 @@ def test_uncorrelated_tag_matches_registry():
             continue
         expect = abs(prod.corr_es) <= 0.20
         assert sym.has("uncorrelated") == expect, f"{sym.ticker} uncorrelated tag wrong"
+
+
+# ---------------------------------------------------------------------------
+# Sector scans stay equities-only; futures need an explicit futures tag
+# ---------------------------------------------------------------------------
+
+def test_sector_tags_exclude_futures():
+    from scanner.universe import select_by_tags
+
+    energy = select_by_tags(DEFAULT_UNIVERSE, {"energy"})
+    assert energy and not any(s.ticker.startswith("/") for s in energy)
+    # a shared style tag must not drag futures in either
+    mixed = select_by_tags(DEFAULT_UNIVERSE, {"energy", "high-iv"})
+    assert mixed and not any(s.ticker.startswith("/") for s in mixed)
+    # but an explicit futures tag still works
+    fut_energy = select_by_tags(DEFAULT_UNIVERSE, {"fut-energy"})
+    assert fut_energy and all(s.ticker.startswith("/") for s in fut_energy)
+    assert "/CL" in {s.ticker for s in fut_energy}
+
+
+def test_dedupe_csps_collapses_strike_ladder():
+    from scanner.scan import dedupe_csps
+
+    cfg = ScanConfig(min_dte=0, max_dte=60, min_annualized_pct=0.0)
+    provider = SyntheticProvider()
+    universe = filter_universe(DEFAULT_UNIVERSE, tickers={"SPY", "AAPL"})
+    result = run_scan(provider, universe, cfg)
+    assert result.csps, "need candidates to dedupe"
+    best = dedupe_csps(result.csps)
+    keys = [(c.ticker, c.expiry) for c in best]
+    assert len(keys) == len(set(keys)), "still more than one strike per ticker+expiry"
+    # order preserved and the kept row is the top-scored one for its key
+    first_by_key = {}
+    for c in result.csps:
+        first_by_key.setdefault((c.ticker, c.expiry), c)
+    for c in best:
+        assert c is first_by_key[(c.ticker, c.expiry)]
+    assert dedupe_csps(result.csps, per_expiry=2)
+    assert len(dedupe_csps(result.csps, per_expiry=2)) >= len(best)
+
+
+# ---------------------------------------------------------------------------
+# Futures scalp radar
+# ---------------------------------------------------------------------------
+
+def _flat_bars(price=100.0, n=60):
+    return [(price + 0.1, price - 0.1, price) for _ in range(n)]
+
+
+def test_scalp_long_setup_at_washed_out_low():
+    from scanner.scalp import analyze
+
+    # downtrend into the session low: RSI pinned, below the lower band
+    bars = []
+    price = 7700.0
+    for i in range(60):
+        price -= 3.0
+        bars.append((price + 2.0, price - 1.0, price))
+    spot = price
+    setup = analyze("/ES", bars, spot, day_low=spot, day_high=7700.0)
+    assert setup.bias == "LONG SCALP"
+    assert setup.rsi <= 30
+    assert "at day low" in setup.signals
+    assert setup.stop is not None and setup.stop < spot
+    assert setup.target is not None and setup.target > spot   # mean is above
+    assert setup.risk_dollars and setup.risk_dollars > 0
+    assert setup.per_point == 50.0 and setup.micro == "/MES"
+
+
+def test_scalp_short_setup_at_blown_out_high():
+    from scanner.scalp import analyze
+
+    bars = []
+    price = 85.0
+    for i in range(60):
+        price += 0.10
+        bars.append((price + 0.05, price - 0.02, price))
+    spot = price
+    setup = analyze("/CL", bars, spot, day_low=85.0, day_high=spot)
+    assert setup.bias == "SHORT SCALP"
+    assert setup.stop is not None and setup.stop > spot
+    assert setup.target is not None and setup.target < spot
+
+
+def test_scalp_no_edge_mid_range():
+    from scanner.scalp import analyze
+
+    setup = analyze("/GC", _flat_bars(4400.0), 4400.0,
+                    day_low=4390.0, day_high=4410.0)
+    assert setup.bias == "no edge"
+    assert setup.stop is None and setup.target is None
+    assert setup.range_pos_pct == pytest.approx(50.0)
+
+
+def test_scalp_needs_enough_bars():
+    from scanner.scalp import analyze
+
+    with pytest.raises(ValueError):
+        analyze("/ES", _flat_bars(n=10), 100.0)
+
+
+def test_scalp_demo_scan_runs_offline():
+    from scanner.scalp import SCALP_FUTURES, run_scalp_scan
+
+    rows, errors = run_scalp_scan("5m", source="demo")
+    assert not errors
+    assert {r.ticker for r in rows} == set(SCALP_FUTURES)
+    for r in rows:
+        assert r.atr > 0 and r.per_point > 0
+        assert r.bias in ("LONG SCALP", "SHORT SCALP",
+                          "lean long", "lean short", "no edge")
+    # actionable setups sort to the top
+    order = [r.bias for r in rows]
+    seen_idle = False
+    for b in order:
+        idle = b not in ("LONG SCALP", "SHORT SCALP")
+        if idle:
+            seen_idle = True
+        assert not (seen_idle and not idle), "actionable row sorted below idle row"
