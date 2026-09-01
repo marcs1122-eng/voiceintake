@@ -153,15 +153,39 @@ DEFAULT_UNIVERSE: list[Symbol] = [
     _s("PDD", "china", "high-iv"), _s("NIO", "china", "high-iv"),
     _s("BIDU", "china", "high-iv"),
     # --- Liquid futures (options on futures; chains require the
-    #     tastytrade provider — Yahoo only feeds their technicals/dips) ---
-    #     Futures carry ONLY the `futures` tag (+ high-iv where apt) so
-    #     sector filters like `energy` return equities only.
-    _s("/ES", "futures"), _s("/NQ", "futures"),
-    _s("/CL", "futures", "high-iv"), _s("/GC", "futures"),
-    _s("/SI", "futures", "high-iv"), _s("/ZB", "futures"),
-    _s("/ZN", "futures"), _s("/NG", "futures", "high-iv"),
-    _s("/ZC", "futures"), _s("/ZS", "futures"), _s("/ZW", "futures"),
-    _s("/6E", "futures"),
+    #     tastytrade provider). Futures carry ONLY futures-side tags so
+    #     equity sector filters like `energy` stay equities-only.
+    #     `uncorrelated` = |90d corr to /ES| <= 0.20 — true diversifiers.
+    _s("/ES", "futures", "fut-index", "fut-liquid"),  # E-mini S&P 500, corr/ES +1.00
+    _s("/MES", "futures", "fut-index", "fut-liquid", "micro"),  # Micro E-mini S&P 500, corr/ES +1.00
+    _s("/NQ", "futures", "fut-index", "fut-liquid"),  # E-mini Nasdaq-100, corr/ES +0.91
+    _s("/MNQ", "futures", "fut-index", "fut-liquid", "micro"),  # Micro E-mini Nasdaq-100, corr/ES +0.91
+    _s("/RTY", "futures", "fut-index", "high-iv"),  # E-mini Russell 2000, corr/ES +0.79
+    _s("/M2K", "futures", "fut-index", "micro", "high-iv"),  # Micro E-mini Russell 2000, corr/ES +0.79
+    _s("/CL", "futures", "fut-energy", "fut-liquid", "high-iv"),  # Crude Oil, corr/ES -0.38
+    _s("/MCL", "futures", "fut-energy", "micro", "high-iv"),  # Micro Crude Oil, corr/ES -0.38
+    _s("/NG", "futures", "fut-energy", "fut-liquid", "uncorrelated", "high-iv"),  # Henry Hub Natural Gas, corr/ES -0.04
+    _s("/GC", "futures", "fut-metals", "fut-liquid"),  # Gold, corr/ES +0.46
+    _s("/MGC", "futures", "fut-metals", "micro"),  # Micro Gold, corr/ES +0.46
+    _s("/SI", "futures", "fut-metals", "fut-liquid", "high-iv"),  # Silver, corr/ES +0.44
+    _s("/SIL", "futures", "fut-metals", "micro", "high-iv"),  # Micro Silver, corr/ES +0.44
+    _s("/HG", "futures", "fut-metals", "high-iv"),  # Copper, corr/ES +0.57
+    _s("/ZN", "futures", "fut-rates", "fut-liquid"),  # 10-Year T-Note, corr/ES +0.45
+    _s("/ZB", "futures", "fut-rates", "fut-liquid"),  # 30-Year T-Bond, corr/ES +0.39
+    _s("/ZF", "futures", "fut-rates"),  # 5-Year T-Note, corr/ES +0.46
+    _s("/ZT", "futures", "fut-rates"),  # 2-Year T-Note, corr/ES +0.43
+    _s("/6E", "futures", "fut-fx", "fut-liquid"),  # Euro FX, corr/ES +0.41
+    _s("/6J", "futures", "fut-fx"),  # Japanese Yen, corr/ES +0.26
+    _s("/6B", "futures", "fut-fx"),  # British Pound, corr/ES +0.31
+    _s("/6A", "futures", "fut-fx"),  # Australian Dollar, corr/ES +0.60
+    _s("/6C", "futures", "fut-fx", "uncorrelated"),  # Canadian Dollar, corr/ES +0.09
+    _s("/ZC", "futures", "fut-ags", "fut-liquid", "uncorrelated"),  # Corn, corr/ES -0.01
+    _s("/ZS", "futures", "fut-ags", "fut-liquid", "uncorrelated"),  # Soybeans, corr/ES -0.07
+    _s("/ZW", "futures", "fut-ags", "uncorrelated", "high-iv"),  # Chicago Wheat, corr/ES -0.03
+    _s("/HE", "futures", "fut-ags", "uncorrelated"),  # Lean Hogs, corr/ES +0.18
+    _s("/LE", "futures", "fut-ags", "uncorrelated"),  # Live Cattle, corr/ES -0.10
+    _s("/MBT", "futures", "fut-crypto", "micro", "high-iv"),  # Micro Bitcoin, corr/ES +0.36
+    _s("/MET", "futures", "fut-crypto", "micro", "high-iv"),  # Micro Ether, corr/ES +0.42
 ]
 
 

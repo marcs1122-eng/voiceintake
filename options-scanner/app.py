@@ -44,9 +44,16 @@ st.title("🎯 Options Income Scanner")
 st.caption("Cash-secured puts · wheel · iron condors · broken wing butterflies — "
            "stocks **and** ETFs. Estimates at mid; not financial advice.")
 
-ALL_TAGS = ["etf", "blue-chip", "dividend", "growth", "high-iv", "futures",
-            "tech", "semis", "financials", "healthcare", "consumer",
-            "industrials", "energy", "materials", "utilities", "reits", "china"]
+ALL_TAGS = [
+    # style / quality
+    "etf", "blue-chip", "dividend", "growth", "high-iv",
+    # equity sectors
+    "tech", "semis", "financials", "healthcare", "consumer",
+    "industrials", "energy", "materials", "utilities", "reits", "china",
+    # futures
+    "futures", "fut-liquid", "uncorrelated", "micro", "fut-index",
+    "fut-energy", "fut-metals", "fut-rates", "fut-fx", "fut-ags", "fut-crypto",
+]
 
 try:
     from scanner.tastytrade_provider import has_credentials as _tasty_ready

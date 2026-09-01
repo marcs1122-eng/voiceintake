@@ -367,3 +367,36 @@ def test_universe_filters():
     assert no_etfs and not any(s.has("etf") for s in no_etfs)
     picks = filter_universe(DEFAULT_UNIVERSE, tickers={"SPY", "AAPL"})
     assert {s.ticker for s in picks} == {"SPY", "AAPL"}
+
+
+def test_futures_registry_sane():
+    from scanner.futures import FUTURES_PRODUCTS, product_for
+
+    syms = [p.symbol for p in FUTURES_PRODUCTS]
+    assert len(syms) == len(set(syms)), "duplicate futures symbols"
+    for p in FUTURES_PRODUCTS:
+        assert p.symbol.startswith("/")
+        assert p.multiplier > 0 and p.margin_estimate > 0
+        assert p.tier in (1, 2, 3)
+        assert -1.0 <= p.corr_es <= 1.0
+        assert p.group
+    # micros must be smaller than their full-size sibling
+    for micro, full in (("/MES", "/ES"), ("/MNQ", "/NQ"), ("/MCL", "/CL"),
+                        ("/MGC", "/GC"), ("/M2K", "/RTY"), ("/SIL", "/SI")):
+        m, f = product_for(micro), product_for(full)
+        assert m.multiplier < f.multiplier and m.margin_estimate < f.margin_estimate
+    # the products we deliberately excluded stay out
+    for excluded in ("/SR3", "/BTC", "/ETH"):
+        assert product_for(excluded) is None
+
+
+def test_uncorrelated_tag_matches_registry():
+    from scanner.futures import product_for
+    from scanner.universe import DEFAULT_UNIVERSE
+
+    for sym in DEFAULT_UNIVERSE:
+        prod = product_for(sym.ticker)
+        if prod is None:
+            continue
+        expect = abs(prod.corr_es) <= 0.20
+        assert sym.has("uncorrelated") == expect, f"{sym.ticker} uncorrelated tag wrong"
