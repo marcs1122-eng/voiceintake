@@ -254,7 +254,7 @@ with tab_plan:
                 def _pos_line(r):
                     return (f"**{r['display']}** ({r['direction']} {r['qty']:g}) — "
                             f"open {r['open_price']:g} → mark {r['mark']:g}, "
-                            f"P/L \\${r['pl_open']:,.0f}")
+                            f"P/L {r['pl_open']:+,.0f}")
 
                 if closes or tested or windows:
                     st.subheader("🔔 Positions needing action")
