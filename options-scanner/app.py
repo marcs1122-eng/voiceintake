@@ -63,26 +63,40 @@ except Exception:
 
 with st.sidebar:
     st.header("Scan settings")
+    from scanner import present as _present
+    preset_name = st.selectbox(
+        "Preset", list(_present.PRESETS), index=0,
+        help="One click sets every filter below. Pick Custom to set your own.")
+    _p = _present.preset(preset_name)
+    if _p.get("blurb"):
+        st.caption(_p["blurb"])
+    _k = "".join(ch if ch.isalnum() else "_" for ch in preset_name)   # widget keys per preset
     demo = st.toggle("Demo mode (synthetic data)", value=bool(os.environ.get("SCANNER_DEMO")))
     use_tasty = st.toggle("tastytrade live data (real-time, incl. futures)",
                           value=TASTY_AVAILABLE, disabled=not TASTY_AVAILABLE,
                           help="Needs TASTYTRADE_CLIENT_SECRET / TASTYTRADE_REFRESH_TOKEN "
                                "in options-scanner/.env — run `python -m scanner.tastytrade_check`")
-    timeframe = st.selectbox(
-        "Signal timeframe (RSI / Bollinger / 50-SMA)",
-        ["1d", "4h", "1h", "10m", "5m"], index=0,
-        help="Daily for swing/wheel entries; drop to 1h–5m to hunt intraday scalp "
-             "setups (oversold bounces at the day's low, etc.)")
-    tags = st.multiselect("Universe tags (empty = everything)", ALL_TAGS, default=[],
-                          help="Sector/style tags scan equities & ETFs only. "
-                               "Pick a futures tag (futures, fut-energy, …) to scan futures.")
     watchlist = st.text_input("Watchlist override (comma-separated)", "")
-    dte = st.slider("Days to expiration", 0, 90, (7, 45))
-    delta = st.slider("Put delta range", 0.05, 0.50, (0.10, 0.35), step=0.01)
-    min_annual = st.number_input("Min annualized ROC %", value=12.0, step=1.0)
-    max_capital = st.number_input("Max capital per put ($, 0 = unlimited)", value=0.0, step=5000.0)
-    min_oi = st.number_input("Min open interest", value=100, step=50)
-    avoid_earnings = st.toggle("Penalize earnings before expiry", value=True)
+    with st.expander("Fine-tune", expanded=(preset_name == "Custom")):
+        _tfs = ["1d", "4h", "1h", "10m", "5m"]
+        timeframe = st.selectbox(
+            "Signal timeframe (RSI / Bollinger / 50-SMA)", _tfs,
+            index=_tfs.index(_p["timeframe"]), key=f"tf_{_k}",
+            help="Daily for swing/wheel entries; drop to 1h–5m to hunt intraday scalp "
+                 "setups (oversold bounces at the day's low, etc.)")
+        tags = st.multiselect("Universe tags (empty = everything)", ALL_TAGS,
+                              default=list(_p["tags"]), key=f"tags_{_k}",
+                              help="Sector/style tags scan equities & ETFs only. "
+                                   "Pick a futures tag (futures, fut-energy, …) to scan futures.")
+        dte = st.slider("Days to expiration", 0, 90, tuple(_p["dte"]), key=f"dte_{_k}")
+        delta = st.slider("Put delta range", 0.05, 0.50, tuple(_p["delta"]), step=0.01,
+                          key=f"delta_{_k}")
+        min_annual = st.number_input("Min annualized ROC %", value=float(_p["min_annual"]),
+                                     step=1.0, key=f"annual_{_k}")
+        max_capital = st.number_input("Max capital per put ($, 0 = unlimited)", value=0.0, step=5000.0)
+        min_oi = st.number_input("Min open interest", value=int(_p["min_oi"]), step=50,
+                                 key=f"oi_{_k}")
+        avoid_earnings = st.toggle("Penalize earnings before expiry", value=True)
     go = st.button("🔍 Run scan", type="primary", use_container_width=True)
 
 if "result" not in st.session_state:
@@ -186,6 +200,7 @@ with tab_plan:
 
         held_unders: list[str] = []
         rows_all: list[dict] = []
+        _checks_out: list = []
 
         # -- Rulebook first: is the book inside the rules before adding to it? --
         if TASTY_AVAILABLE:
@@ -211,6 +226,7 @@ with tab_plan:
                 except Exception:
                     pass
                 _checks = _rules.check(rows_all, _tags_all, _bal, _bd)
+                _checks_out = _checks
                 _worst = _rules.worst_status(_checks)
                 st.subheader({"breach": "📏 Rulebook — 🔴 outside the rules",
                               "warn": "📏 Rulebook — 🟡 near a limit",
@@ -360,6 +376,60 @@ with tab_plan:
                 st.success(f"Logged {_n} new pick(s). They get graded at 7, 14 and "
                            "30 days and at expiry — see 📈 Scorecard.")
 
+        # -- Alerts: everything above, reduced to act / watch --
+        st.subheader("🔔 Alerts")
+        from scanner import alerts as _alerts
+        _al = _alerts.build_alerts(result, _tags, rows_all, _checks_out)
+        if not _al:
+            st.write("Nothing needs action.")
+        for _a in _al:
+            if _a.level == "act":
+                st.error(f"{_a.icon} {_a.text}")
+            elif _a.level == "watch":
+                st.warning(f"{_a.icon} {_a.text}")
+            else:
+                st.caption(f"{_a.icon} {_a.text}")
+        if _al and _alerts.smtp_configured():
+            if st.button("📧 Email me these", key="email_alerts"):
+                st.info(_alerts.send_email(_al, subject=f"Scanner alerts {pulled}"))
+
+        # -- Print: the same one-page brief the morning routine emails --
+        st.subheader("🖨️ Print today's plan")
+        try:
+            from tools import brief_pdf as _bp
+            _brief = _present.brief_from_result(
+                result, _tags, picks, _checks_out,
+                sorted(_earn, key=lambda r: r["Days"]), scan_time, held_unders)
+            _html = _bp.build_html(_brief, _bp.inline_fonts())
+            _c1, _c2 = st.columns(2)
+            _c1.download_button("Download HTML (open → print)", _html,
+                                "trade-plan.html", "text/html", key="plan_html")
+            _can_pdf = False
+            try:
+                import playwright  # noqa: F401
+                _can_pdf = _bp.find_chromium() is not None
+            except ImportError:
+                pass
+            if _can_pdf:
+                if _c2.button("Build PDF + PNG", key="plan_build"):
+                    import pathlib as _pl
+                    import tempfile as _tf
+                    _out = _pl.Path(_tf.mkdtemp(prefix="plan-"))
+                    _pdf, _png = _bp.render(_brief, _out)
+                    st.session_state.plan_files = (pulled, _pdf.read_bytes(), _png.read_bytes())
+                _pf = st.session_state.get("plan_files")
+                if _pf and _pf[0] == pulled:
+                    _d1, _d2 = st.columns(2)
+                    _d1.download_button("Download PDF", _pf[1], "trade-plan.pdf",
+                                        "application/pdf", key="plan_pdf")
+                    _d2.download_button("Download PNG", _pf[2], "trade-plan.png",
+                                        "image/png", key="plan_png")
+            else:
+                _c2.caption("PDF needs `playwright` + Chromium on this host; "
+                            "the HTML prints from any browser.")
+        except Exception as exc:
+            st.caption(f"Printable brief unavailable: {exc}")
+
         st.caption("Exit plan for anything you open: 25% of max on day one, 30% on "
                    "day two, then 50% or the 21-DTE window — same rules the "
                    "Positions tab enforces.")
@@ -370,12 +440,8 @@ with tab_csp:
     elif not result.csps:
         st.write("No puts passed the filters.")
     else:
-        show_all = st.toggle(
-            "Show every strike in the delta band", value=False,
-            help="Off = the single best-scored strike per ticker & expiry. "
-                 "On = the full strike ladder (eight /ES rows at one expiry "
-                 "is the same trade at different deltas).")
-        csps = result.csps if show_all else dedupe_csps(result.csps)
+        _view = st.radio("View", ["Cards", "Table"], horizontal=True,
+                         label_visibility="collapsed", key="csp_view")
 
         def _day_flag(tk):
             info = result.infos.get(tk)
@@ -387,32 +453,71 @@ with tab_csp:
                 return "AT HIGH"
             return ""
 
-        df = pd.DataFrame([{
-            "Pulled": pulled,
-            "Score": score_csp(c, _tags.get(c.ticker, frozenset()), _cfg),
-            "Ticker": c.ticker, "Spot": round(c.spot, 2),
-            "RSI": round(c.rsi_14, 1),
-            "IVR": round(c.iv_rank) if c.iv_rank is not None else None,
-            "Day Lo": round(result.infos[c.ticker].day_low, 2) if c.ticker in result.infos else None,
-            "Day Hi": round(result.infos[c.ticker].day_high, 2) if c.ticker in result.infos else None,
-            "@Day": _day_flag(c.ticker),
-            "Expiry": c.expiry.strftime("%m/%d/%Y"),
-            "DTE": c.dte, "Strike": c.strike, "Mid": c.mid,
-            "Premium/ct $": round(c.premium),
-            "Capital $": round(c.capital),
-            "Basis": "margin" if c.is_futures else "cash",
-            "ROC %": round(c.roc_pct, 2), "Annualized %": round(c.annualized_pct, 1),
-            "Breakeven": round(c.breakeven, 2),
-            "Cushion %": round(c.downside_protection_pct, 1),
-            "EM $": round(c.expected_move, 2) if c.expected_move else None,
-            "Strike/EM": round(c.em_cushion, 2) if c.em_cushion is not None else None,
-            "Delta": round(abs(c.delta), 2), "P(OTM) %": round(c.prob_otm_pct),
-            "IV %": round(c.iv * 100), "OI": c.open_interest,
-            "Signals": " + ".join(sorted(c.entry_signals)),
-            "Earnings⚠": c.earnings_before_expiry,
-        } for c in csps])
-        st.dataframe(df, use_container_width=True, hide_index=True)
-        st.download_button("Download CSV", df.to_csv(index=False), "csps.csv")
+        if _view == "Cards":
+            st.caption("Best strike per name and expiry, ranked by score. "
+                       "Switch to **Table** for every column and every strike.")
+            for c in dedupe_csps(result.csps)[:10]:
+                s_ = score_csp(c, _tags.get(c.ticker, frozenset()), _cfg)
+                _chips = _present.chips(c)
+                if _day_flag(c.ticker) == "AT LOW":
+                    _chips.append("🟢 at day low")
+                with st.container(border=True):
+                    st.markdown(f"**{_present.verdict(c)}**")
+                    st.caption("  ".join(_chips) + f"  ·  score {s_:g}")
+                    with st.expander("Details"):
+                        m1, m2, m3, m4 = st.columns(4)
+                        m1.metric("Annualized", f"{c.annualized_pct:.0f}%")
+                        m2.metric("Breakeven", f"{c.breakeven:,.2f}")
+                        m3.metric("Cushion", f"{c.downside_protection_pct:.1f}%")
+                        m4.metric("Delta / OI", f"{abs(c.delta):.2f} / {c.open_interest:,}")
+                        st.caption(f"Spot {c.spot:,.2f} · mid {c.mid:g} · IV {c.iv*100:.0f}% · "
+                                   f"{c.dte} DTE · signals: "
+                                   f"{', '.join(sorted(c.entry_signals)) or 'none'}")
+        else:
+            show_all = st.toggle(
+                "Show every strike in the delta band", value=False,
+                help="Off = the single best-scored strike per ticker & expiry. "
+                     "On = the full strike ladder (eight /ES rows at one expiry "
+                     "is the same trade at different deltas).")
+            csps = result.csps if show_all else dedupe_csps(result.csps)
+            df = pd.DataFrame([{
+                "Pulled": pulled,
+                "Score": score_csp(c, _tags.get(c.ticker, frozenset()), _cfg),
+                "Ticker": c.ticker, "Spot": c.spot,
+                "RSI": c.rsi_14,
+                "IVR": c.iv_rank,
+                "Day Lo": result.infos[c.ticker].day_low if c.ticker in result.infos else None,
+                "Day Hi": result.infos[c.ticker].day_high if c.ticker in result.infos else None,
+                "@Day": _day_flag(c.ticker),
+                "Expiry": c.expiry.strftime("%m/%d/%Y"),
+                "DTE": c.dte, "Strike": c.strike, "Mid": c.mid,
+                "Premium/ct $": c.premium,
+                "Capital $": c.capital,
+                "Basis": "margin" if c.is_futures else "cash",
+                "ROC %": c.roc_pct, "Annualized %": c.annualized_pct,
+                "Breakeven": c.breakeven,
+                "Cushion %": c.downside_protection_pct,
+                "EM $": c.expected_move or None,
+                "Strike/EM": c.em_cushion,
+                "Delta": abs(c.delta), "P(OTM) %": c.prob_otm_pct,
+                "IV %": c.iv * 100, "OI": c.open_interest,
+                "Signals": "  ".join(_present.chips(c)),
+                "Earnings⚠": c.earnings_before_expiry,
+            } for c in csps])
+            _num = st.column_config.NumberColumn
+            st.dataframe(df, use_container_width=True, hide_index=True, column_config={
+                "Score": _num(format="%d"), "Spot": _num(format="%.2f"),
+                "RSI": _num(format="%.0f"), "IVR": _num(format="%.0f"),
+                "Day Lo": _num(format="%.2f"), "Day Hi": _num(format="%.2f"),
+                "Strike": _num(format="%g"), "Mid": _num(format="%.2f"),
+                "Premium/ct $": _num(format="$%d"), "Capital $": _num(format="$%d"),
+                "ROC %": _num(format="%.2f%%"), "Annualized %": _num(format="%.0f%%"),
+                "Breakeven": _num(format="%.2f"), "Cushion %": _num(format="%.1f%%"),
+                "EM $": _num(format="%.2f"), "Strike/EM": _num(format="%.2f×"),
+                "Delta": _num(format="%.2f"), "P(OTM) %": _num(format="%.0f%%"),
+                "IV %": _num(format="%.0f%%"), "OI": _num(format="%d"),
+            })
+            st.download_button("Download CSV", df.to_csv(index=False), "csps.csv")
 
 with tab_ic:
     if not have_result:
@@ -738,5 +843,59 @@ with tab_pos:
                         "Expires", "Type", "Account"]
                 pos_df = pos_df[[c for c in cols if c in pos_df.columns]]
                 st.dataframe(pos_df, use_container_width=True, hide_index=True)
+
+                # -- Roll assistant: price the standard repairs for tested shorts --
+                _tested = [r for r in rows
+                           if "TESTED" in str(r.get("suggestion", ""))
+                           and "option" in str(r.get("type", "")).lower()
+                           and r.get("expires")]
+                if _tested:
+                    st.subheader("🔧 Roll assistant")
+                    st.caption("For each tested short: the same strike out in time, or one "
+                               "strike further out and out in time. Credits first — a debit "
+                               "roll is shown, never recommended.")
+                    from scanner import roll as _roll
+                    from scanner import rules as _rl
+                    if demo:
+                        from scanner.data import SyntheticProvider as _SP
+                        _rp = _SP()
+                    elif use_tasty:
+                        _rp = TastytradeProvider()
+                    else:
+                        from scanner.data import YFinanceProvider as _YP
+                        _rp = _YP()
+                    for r in _tested:
+                        _po = _rl.parse_option(r["symbol"])
+                        if not _po:
+                            continue
+                        _exp = _dt.datetime.strptime(r["expires"], "%m/%d/%Y").date()
+                        with st.expander(f"{r['display']} — roll options"):
+                            try:
+                                _rolls = _roll.roll_candidates(
+                                    _rp, _po["root"], _po["strike"], _po["is_put"], _exp,
+                                    current_mark=float(r["mark"]),
+                                    original_credit=float(r["open_price"]))
+                            except Exception as exc:
+                                st.caption(f"Couldn't price rolls: {exc}")
+                                continue
+                            if not _rolls:
+                                st.write("No expiries 14–60 days further out with quotes.")
+                                continue
+                            _best = _roll.best_roll(_rolls)
+                            if _best:
+                                st.success(f"Default: **{_best.label}** → {_best.strike:g} "
+                                           f"exp {_best.expiry:%m/%d/%Y} ({_best.dte} DTE) for a "
+                                           f"**\\${_best.net_dollars:,.0f} credit**; new breakeven "
+                                           f"{_best.new_breakeven:,.2f}.")
+                            else:
+                                st.warning("Every roll here is a debit — consider taking the "
+                                           "loss instead of paying to extend it.")
+                            st.dataframe(pd.DataFrame([{
+                                "Roll": x.label, "Expiry": x.expiry.strftime("%m/%d/%Y"),
+                                "DTE": x.dte, "Strike": x.strike, "New mid": x.new_mid,
+                                "Net $": round(x.net_dollars), "Credit?": "✅" if x.is_credit else "❌ debit",
+                                "Delta": round(abs(x.delta), 2), "New breakeven": x.new_breakeven,
+                                "OI": x.open_interest,
+                            } for x in _rolls]), hide_index=True, use_container_width=True)
         except Exception as exc:
             st.error(f"Couldn't load positions: {exc}")

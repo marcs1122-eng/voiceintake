@@ -855,3 +855,111 @@ def test_track_due_and_grade_with_quotes(tmp_path):
     assert reloaded["SO"].grades and reloaded["SO"].grades["7"]["tested"]   # low 84.9 < 85 strike
     assert set(reloaded["SO"].grades) == {"7", "14"}
     assert track.main(["due", "--today", "2026-09-16", "--path", str(path)]) == 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — roll assistant, alerts, plain-English layer
+# ---------------------------------------------------------------------------
+
+def test_roll_candidates_price_both_repairs():
+    from scanner import roll
+
+    prov = SyntheticProvider()
+    info = prov.underlying("AAPL")
+    cur = info.expiries[0]
+    chain = prov.chain("AAPL", cur)
+    short = [q for q in chain.puts if q.strike < chain.spot][-3]     # a near-the-money put we're "short"
+    mark = short.mid
+    rolls = roll.roll_candidates(prov, "AAPL", short.strike, True, cur,
+                                 current_mark=mark, original_credit=mark * 0.6)
+    assert rolls, "expected roll candidates from later expiries"
+    assert {r.label for r in rolls} <= {"same strike", "one strike out"}
+    assert all(r.expiry > cur and r.dte > chain.dte for r in rolls)
+    same = [r for r in rolls if r.label == "same strike"]
+    assert same and all(r.strike == short.strike for r in same)
+    out = [r for r in rolls if r.label == "one strike out"]
+    assert out and all(r.strike < short.strike for r in out)
+    # further-dated same strike is worth more than the near one → a credit
+    assert any(r.is_credit for r in same)
+    for r in rolls:
+        assert r.net == pytest.approx(r.new_mid - mark, abs=0.011)
+        assert r.net_dollars == pytest.approx(r.net * r.multiplier)
+        assert -1.0 <= r.delta <= 0.0
+    # sorted credits first, biggest first
+    nets = [r.net for r in rolls if r.is_credit]
+    assert nets == sorted(nets, reverse=True)
+    best = roll.best_roll(rolls)
+    assert best is not None and best.is_credit and best.net == nets[0]
+    assert roll.best_roll([]) is None
+
+
+def test_alerts_levels_and_text():
+    from scanner import alerts, rules
+
+    universe = filter_universe(DEFAULT_UNIVERSE, tickers={"SPY", "AAPL", "KO", "PLTR"})
+    tags = {s.ticker: s.tags for s in universe}
+    res = run_scan(SyntheticProvider(), universe, ScanConfig(min_annualized_pct=0.0))
+    # force one quality name into a washout and one held name into earnings week
+    res.infos["KO"].rsi_14 = 24.0
+    res.infos["AAPL"].next_earnings = dt.date(2026, 9, 5)
+    res.infos["PLTR"].rsi_14 = 20.0                     # not blue-chip/etf → no watch alert
+    positions = [
+        {"underlying": "AAPL", "display": "AAPL 10/16/26 $295 PUT", "suggestion": "💰 CLOSE — 55% captured, hit the 50% rule"},
+        {"underlying": "MU", "display": "MU 10/16/26 $750 PUT", "suggestion": "⏰ 19 DTE — inside the 21-DTE roll/close window"},
+        {"underlying": "SNDK", "display": "SNDK 10/16/26 $1220 PUT", "suggestion": "hold"},
+    ]
+    checks = [rules.RuleCheck("Per sector", 3, 2, "breach", "over: utilities (3)"),
+              rules.RuleCheck("Open positions", 18, 20, "warn", "18 of 20")]
+    out = alerts.build_alerts(res, tags, positions, checks, today=dt.date(2026, 9, 2))
+    levels = [(a.level, a.ticker) for a in out]
+    assert ("act", "AAPL") in levels                    # close signal
+    assert ("watch", "MU") in levels                    # DTE window
+    assert ("act", "") in levels and ("watch", "") in levels   # rule breach + warn
+    assert any(a.level == "watch" and a.ticker == "KO" and "RSI 24" in a.text for a in out)
+    assert any(a.level == "act" and a.ticker == "AAPL" and "reports" in a.text for a in out)
+    assert not any(a.ticker == "PLTR" for a in out)
+    assert not any("SNDK" in a.text for a in out)
+    assert [a.level for a in out] == sorted((a.level for a in out), key=lambda l: alerts.LEVEL_ORDER[l])
+    txt = alerts.format_text(out, "09/02")
+    assert txt.startswith("Scanner alerts 09/02") and "ACT TODAY" in txt and "WATCH" in txt
+    assert alerts.format_text([]) == "Nothing needs action."
+    assert not alerts.smtp_configured()
+    assert "not configured" in alerts.send_email(out)
+
+
+def test_presentation_layer():
+    from scanner import present
+    from scanner.scan import score_csp
+
+    c = build_csps(_chain(), entry_signals=frozenset({"RSI<=30", "LowerBB"}), iv_rank=42.0,
+                   expected_move=8.0)[0]
+    c.rsi_14 = 27.0
+    v = present.verdict(c)
+    assert v.startswith(f"Sell the TEST {c.strike:g} put") and "collect $" in v and "cash" in v
+    ch = present.chips(c)
+    assert ch[0].startswith("🟢 RSI 27") and "🟢 band" in ch and "⚪ 50-SMA" in ch
+    assert any(x.startswith("🟢 IVR 42") for x in ch)
+    assert any("EM" in x for x in ch)
+    assert "RSI<=30" in present.why(c) and "IVR 42" in present.why(c)
+    assert "at the low of day" in present.why(c, at_day_low=True)
+
+    for name in present.PRESETS:
+        p = present.preset(name)
+        assert set(p) >= {"timeframe", "tags", "dte", "delta", "min_annual", "min_oi"}
+        assert p["dte"][0] <= p["dte"][1] and p["delta"][0] < p["delta"][1]
+    assert present.preset("Scalp · intraday")["timeframe"] == "5m"
+    assert present.preset("Custom") == present.DEFAULTS
+
+    universe = filter_universe(DEFAULT_UNIVERSE, tickers={"SPY", "AAPL", "KO", "/ES"})
+    tags = {s.ticker: s.tags for s in universe}
+    res = run_scan(SyntheticProvider(), universe, ScanConfig(min_annualized_pct=0.0))
+    picks = []
+    seen = set()
+    for x in res.csps:
+        if x.ticker not in seen:
+            seen.add(x.ticker); picks.append((score_csp(x, tags[x.ticker], ScanConfig()), x))
+    brief = present.brief_from_result(res, tags, picks[:3], when=dt.datetime(2026, 9, 2, 8, 46))
+    assert brief["title"] and brief["date"].endswith("09/02/2026") and brief["pulled"] == "8:46am ET"
+    assert len(brief["candidates"]) == 3 and all(k in brief["candidates"][0] for k in ("ticker", "spot", "rsi", "zone", "signals"))
+    assert brief["posture"]["rows"][0]["sym"] == "/ES"
+    assert "footer" in brief
