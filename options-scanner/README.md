@@ -128,3 +128,21 @@ python -m pytest tests/ -q
 Yahoo data is delayed ~15 minutes and occasionally has stale quotes on thin
 strikes — the OI/spread filters catch most of it. This is a screener, not an
 execution tool, and nothing here is financial advice.
+
+## Printable briefs
+
+The scheduled morning brief and scalp-radar pulses are only useful on paper —
+`tools/brief_pdf.py` turns a brief into a one-page Letter PDF plus a 276-DPI
+PNG (print the PNG when a PDF reader isn't handy; every device prints an
+image). Same typography as the Core 20 and Futures reference cards.
+
+```bash
+pip install playwright          # Chromium is auto-detected
+python3 tools/brief_pdf.py brief.json -o out/
+```
+
+The JSON schema is documented in the script's docstring: `title`, `date`,
+`pulled`, `lede`, `posture` (futures rows + a one-line read), `candidates`
+(ticker / spot / rsi / signals / zone / size), `loud`, `avoid`, `todo`,
+`footer`. Every section except title/date is optional and simply omitted
+from the sheet when absent.
