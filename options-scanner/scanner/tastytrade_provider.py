@@ -33,17 +33,39 @@ from .futures import is_futures, product_for
 QUOTE_BATCH = 90          # market-data endpoint symbol limit per call
 MAX_STRIKES_EACH_SIDE = 40  # strikes fetched around the money per expiry
 
+import threading
+
 _loop: asyncio.AbstractEventLoop | None = None
+_loop_lock = threading.Lock()
+
+
+def _get_loop() -> asyncio.AbstractEventLoop:
+    """One persistent event loop on its own daemon thread. The scan runs
+    symbols in a thread pool, and `loop.run_until_complete` from several
+    threads at once breaks; `run_coroutine_threadsafe` onto a loop that is
+    already running does not, and lets the SDK's awaits interleave."""
+    global _loop
+    with _loop_lock:
+        if _loop is None or _loop.is_closed():
+            _loop = asyncio.new_event_loop()
+            threading.Thread(target=_loop.run_forever, name="tasty-loop",
+                             daemon=True).start()
+    return _loop
 
 
 def _run(coro):
-    """tastytrade SDK v13+ is async-only. Run its coroutines on one
-    persistent event loop so SDK connection state survives across calls
-    (asyncio.run would tear the loop down every time)."""
-    global _loop
-    if _loop is None or _loop.is_closed():
-        _loop = asyncio.new_event_loop()
-    return _loop.run_until_complete(coro)
+    """tastytrade SDK v13+ is async-only. Run its coroutines on the shared
+    loop thread and block for the result — safe from any thread."""
+    return asyncio.run_coroutine_threadsafe(coro, _get_loop()).result()
+
+
+def _pct(x) -> float | None:
+    """Normalise a tastytrade ratio: they return fractions (0.35) for IV
+    rank / percentile / yield; the scanner shows 0-100."""
+    if x is None:
+        return None
+    v = float(x)
+    return v * 100.0 if v <= 1.0 else v
 
 
 def _load_env_file() -> None:
@@ -83,6 +105,72 @@ class TastytradeProvider(DataProvider):
         self._equity_chains: dict[str, dict] = {}
         self._future_chains: dict[str, dict] = {}
         self._info_cache: dict[str, UnderlyingInfo] = {}
+        self._metrics: dict[str, object] = {}          # symbol -> MarketMetricInfo
+        self._expiry_iv: dict[str, dict] = {}          # symbol -> {expiry: iv}
+
+    # ------------------------------------------------------------------
+    # Market metrics: IV rank / percentile, beta, liquidity, real earnings
+    # dates, dividend yield — one bulk call for the whole universe.
+    # ------------------------------------------------------------------
+
+    def prefetch(self, tickers: list[str]) -> None:
+        from tastytrade.metrics import get_market_metrics
+        want = [t for t in tickers if t not in self._metrics]
+        equities = [t for t in want if not is_futures(t)]
+        futures = [t for t in want if is_futures(t)]
+        for group in (equities, futures):
+            for i in range(0, len(group), 100):
+                batch = group[i:i + 100]
+                try:
+                    for m in _run(get_market_metrics(self.session, batch)):
+                        self._metrics[m.symbol] = m
+                        exps = getattr(m, "option_expiration_implied_volatilities", None) or []
+                        self._expiry_iv[m.symbol] = {
+                            e.expiration_date: float(e.implied_volatility)
+                            for e in exps if getattr(e, "implied_volatility", None)}
+                except Exception:
+                    pass   # metrics are an enrichment, never a blocker
+
+    def expiry_iv(self, ticker: str, expiry: dt.date) -> float | None:
+        return self._expiry_iv.get(ticker, {}).get(expiry)
+
+    def _apply_metrics(self, info: UnderlyingInfo) -> None:
+        m = self._metrics.get(info.ticker)
+        if m is None:
+            return
+        g = lambda name: getattr(m, name, None)  # noqa: E731
+        ivr = g("implied_volatility_index_rank") or g("tw_implied_volatility_index_rank")
+        if ivr is not None:
+            info.iv_rank = _pct(ivr)
+            info.iv_source = "tastytrade"
+        if g("implied_volatility_percentile") is not None:
+            info.iv_percentile = _pct(g("implied_volatility_percentile"))
+        if g("implied_volatility_index") is not None:
+            info.iv_index = float(g("implied_volatility_index"))
+        if g("historical_volatility_30_day") is not None:
+            info.hv_30 = float(g("historical_volatility_30_day"))
+        if g("beta") is not None:
+            info.beta = float(g("beta"))
+        if g("corr_spy_3month") is not None:
+            info.corr_spy = float(g("corr_spy_3month"))
+        if g("liquidity_rating") is not None:
+            try:
+                info.liquidity_rating = int(g("liquidity_rating"))
+            except (TypeError, ValueError):
+                pass
+        if g("dividend_yield") is not None:
+            info.dividend_yield = float(g("dividend_yield"))
+            if info.dividend_yield > 1.0:          # given as percent
+                info.dividend_yield /= 100.0
+        # the broker's expected report date beats Yahoo's fiscal guesses
+        report = getattr(g("earnings"), "expected_report_date", None)
+        if report is not None:
+            try:
+                d = report.date() if hasattr(report, "date") and not isinstance(report, dt.date) else report
+                if d >= dt.date.today():
+                    info.next_earnings = d
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # Underlying info: history/technicals from Yahoo, live spot from tasty
@@ -110,6 +198,13 @@ class TastytradeProvider(DataProvider):
                 from .data import signal_stats
                 (info.rsi_14, info.sma_50,
                  info.boll_lower, info.boll_upper) = signal_stats(closes, info.spot or closes[-1])
+
+        # IV rank / percentile, beta, liquidity, dividend yield, real earnings
+        # date — from the bulk market-metrics prefetch (fetch on demand if the
+        # caller skipped prefetch, e.g. a single-symbol lookup).
+        if ticker not in self._metrics:
+            self.prefetch([ticker])
+        self._apply_metrics(info)
 
         md = self._live_quote(ticker)
         if md is not None:
@@ -286,7 +381,8 @@ class TastytradeProvider(DataProvider):
             exp = self._equity_chain(ticker)["expirations"][expiry]
             multiplier = self._equity_chain(ticker)["multiplier"]
 
-        spot = self.underlying(ticker).spot
+        info = self.underlying(ticker)
+        spot, q = info.spot, info.dividend_yield
         strikes = sorted(exp.strikes, key=lambda s: float(s.strike_price))
         # trim far wings so each expiry stays within a couple of quote batches
         below = [s for s in strikes if float(s.strike_price) <= spot][-MAX_STRIKES_EACH_SIDE:]
@@ -305,21 +401,21 @@ class TastytradeProvider(DataProvider):
         puts, calls = [], []
         for s in strikes:
             k = float(s.strike_price)
-            puts.append(self._quote(quotes.get(s.put), k, spot, t_years, True))
-            calls.append(self._quote(quotes.get(s.call), k, spot, t_years, False))
+            puts.append(self._quote(quotes.get(s.put), k, spot, t_years, True, q))
+            calls.append(self._quote(quotes.get(s.call), k, spot, t_years, False, q))
         return ChainSnapshot(ticker, spot, expiry,
                              [q for q in puts if q], [q for q in calls if q],
                              multiplier=multiplier)
 
     @staticmethod
     def _quote(md, strike: float, spot: float, t_years: float,
-               is_put: bool) -> OptionQuote | None:
+               is_put: bool, q: float = 0.0) -> OptionQuote | None:
         if md is None:
             return None
         bid = float(md.bid or 0)
         ask = float(md.ask or 0)
         mid = (bid + ask) / 2 if (bid or ask) else float(md.mark or 0)
-        iv = bs.implied_vol(mid, spot, strike, t_years, is_put=is_put) if spot else 0.0
+        iv = bs.implied_vol(mid, spot, strike, t_years, is_put=is_put, q=q) if spot else 0.0
         return OptionQuote(strike=strike, bid=bid, ask=ask, iv=iv,
                            open_interest=int(md.open_interest or 0),
                            volume=int(md.volume or 0))

@@ -54,50 +54,98 @@ def _earnings_before(info: UnderlyingInfo, expiry: dt.date) -> bool:
     return info.next_earnings is not None and info.next_earnings <= expiry
 
 
+def _atm_iv(chain) -> float:
+    """Average IV of the two strikes nearest spot — the chain's own read on
+    volatility for this expiry, used for the expected move when the
+    provider doesn't supply one."""
+    cands = [q for q in chain.puts + chain.calls if q.iv > 0]
+    if not cands:
+        return 0.0
+    near = sorted(cands, key=lambda q: abs(q.strike - chain.spot))[:2]
+    return sum(q.iv for q in near) / len(near)
+
+
+def _scan_one(provider: DataProvider, ticker: str, cfg: ScanConfig) -> ScanResult:
+    """Everything for one symbol, returned as a mini-result so workers never
+    touch shared state."""
+    from . import bs
+    from .futures import product_for
+
+    part = ScanResult()
+    info = provider.underlying(ticker)
+    part.infos[ticker] = info
+    prod = product_for(ticker)
+    margin = prod.margin_estimate if prod else None
+    for expiry in _target_expiries(info, cfg):
+        chain = provider.chain(ticker, expiry)
+        earn = _earnings_before(info, expiry)
+        iv_exp = provider.expiry_iv(ticker, expiry) or _atm_iv(chain)
+        em = bs.expected_move(chain.spot, iv_exp, chain.dte) if iv_exp else None
+        part.csps.extend(build_csps(
+            chain, earnings_before_expiry=earn,
+            delta_range=(cfg.delta_min, cfg.delta_max),
+            min_open_interest=cfg.min_open_interest,
+            max_spread_pct=cfg.max_spread_pct,
+            min_premium=cfg.min_premium,
+            entry_signals=info.entry_signals,
+            margin_estimate=margin, rsi_14=info.rsi_14,
+            expected_move=em, iv_rank=info.iv_rank,
+            dividend_yield=info.dividend_yield))
+        ic = build_iron_condor(
+            chain, short_delta=cfg.condor_short_delta,
+            width_pct=cfg.condor_width_pct,
+            min_open_interest=cfg.min_open_interest,
+            earnings_before_expiry=earn)
+        if ic:
+            part.condors.append(ic)
+        fly = build_bwb(
+            chain, body_delta=cfg.bwb_body_delta,
+            min_open_interest=max(cfg.min_open_interest // 2, 25),
+            earnings_before_expiry=earn)
+        if fly:
+            part.bwbs.append(fly)
+    return part
+
+
 def run_scan(provider: DataProvider, universe: list[Symbol],
              cfg: ScanConfig | None = None,
              progress=None) -> ScanResult:
-    """Sweep every symbol. `progress` is an optional callback(i, n, ticker)."""
-    from .futures import product_for
+    """Sweep every symbol, `cfg.max_workers` at a time. `progress` is an
+    optional callback(i, n, ticker), invoked on the calling thread as each
+    symbol finishes (so it is safe to drive a Streamlit progress bar)."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     cfg = cfg or ScanConfig()
     result = ScanResult()
     tags = {s.ticker: s.tags for s in universe}
+    tickers = [s.ticker for s in universe]
 
-    for i, sym in enumerate(universe):
-        if progress:
-            progress(i, len(universe), sym.ticker)
-        try:
-            info = provider.underlying(sym.ticker)
-            result.infos[sym.ticker] = info
-            prod = product_for(sym.ticker)
-            margin = prod.margin_estimate if prod else None
-            for expiry in _target_expiries(info, cfg):
-                chain = provider.chain(sym.ticker, expiry)
-                earn = _earnings_before(info, expiry)
-                result.csps.extend(build_csps(
-                    chain, earnings_before_expiry=earn,
-                    delta_range=(cfg.delta_min, cfg.delta_max),
-                    min_open_interest=cfg.min_open_interest,
-                    max_spread_pct=cfg.max_spread_pct,
-                    min_premium=cfg.min_premium,
-                    entry_signals=info.entry_signals,
-                    margin_estimate=margin, rsi_14=info.rsi_14))
-                ic = build_iron_condor(
-                    chain, short_delta=cfg.condor_short_delta,
-                    width_pct=cfg.condor_width_pct,
-                    min_open_interest=cfg.min_open_interest,
-                    earnings_before_expiry=earn)
-                if ic:
-                    result.condors.append(ic)
-                fly = build_bwb(
-                    chain, body_delta=cfg.bwb_body_delta,
-                    min_open_interest=max(cfg.min_open_interest // 2, 25),
-                    earnings_before_expiry=earn)
-                if fly:
-                    result.bwbs.append(fly)
-        except Exception as exc:  # a bad ticker must never kill the scan
-            result.errors[sym.ticker] = str(exc)
+    try:                       # one bulk market-metrics call, when supported
+        provider.prefetch(tickers)
+    except Exception:
+        pass
+
+    parts: dict[str, ScanResult] = {}
+    workers = max(1, min(cfg.max_workers, len(tickers) or 1))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = {pool.submit(_scan_one, provider, t, cfg): t for t in tickers}
+        for done, fut in enumerate(as_completed(futs)):
+            t = futs[fut]
+            if progress:
+                progress(done, len(tickers), t)
+            try:
+                parts[t] = fut.result()
+            except Exception as exc:  # a bad ticker must never kill the scan
+                result.errors[t] = str(exc)
+
+    for t in tickers:          # keep universe order so output is deterministic
+        p = parts.get(t)
+        if p is None:
+            continue
+        result.infos.update(p.infos)
+        result.csps.extend(p.csps)
+        result.condors.extend(p.condors)
+        result.bwbs.extend(p.bwbs)
 
     if cfg.max_capital is not None:
         result.csps = [c for c in result.csps if c.capital <= cfg.max_capital]
@@ -142,6 +190,20 @@ def score_csp(c: CashSecuredPut, tags: frozenset, cfg: ScanConfig) -> float:
     # at the same yield.
     entry = min(len(c.entry_signals), 3) * 6.0
     score = yield_score + safety + protection + liquidity + quality + entry
+    # v2 — volatility context. Premium is only "rich" relative to the name's
+    # own history: up to 10 pts for IV rank, and a penalty when IVR is under
+    # 20 (cheap premium usually means IV is about to expand against you).
+    # Both terms are silent when the provider has no IV data.
+    if c.iv_rank is not None:
+        ivr = min(max(c.iv_rank, 0.0), 100.0)
+        score += ivr / 100.0 * 10.0
+        if ivr < 20.0:
+            score -= 8.0
+    # v2 — strike placement. Outside one expected move is the professional
+    # default; reward it, and give partial credit for 0.7+ EM.
+    cushion = c.em_cushion
+    if cushion is not None:
+        score += 6.0 if cushion >= 1.0 else (3.0 if cushion >= 0.7 else 0.0)
     if c.earnings_before_expiry and cfg.avoid_earnings:
         score -= 20.0
     if c.spread_pct > 0.12:

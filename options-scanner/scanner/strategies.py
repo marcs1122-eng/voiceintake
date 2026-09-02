@@ -45,10 +45,21 @@ class CashSecuredPut:
     multiplier: float = 100.0                # $ per 1.00 of premium
     margin_estimate: float | None = None     # futures: initial margin per contract
     rsi_14: float = 50.0                     # underlying's RSI on the scan timeframe
+    expected_move: float | None = None       # 1σ move to expiry, price units
+    iv_rank: float | None = None             # 0-100 (tastytrade) or HV-rank proxy
+    dividend_yield: float = 0.0
 
     @property
     def is_futures(self) -> bool:
         return self.margin_estimate is not None
+
+    @property
+    def em_cushion(self) -> float | None:
+        """How many expected moves the strike sits below spot. ≥ 1.0 is the
+        professional's 'outside one expected move'."""
+        if not self.expected_move:
+            return None
+        return (self.spot - self.strike) / self.expected_move
 
     @property
     def capital(self) -> float:
@@ -99,7 +110,10 @@ def build_csps(chain: ChainSnapshot, *, min_dte_ok: bool = True,
                min_premium: float = 0.05,
                entry_signals: frozenset = frozenset(),
                margin_estimate: float | None = None,
-               rsi_14: float = 50.0) -> list[CashSecuredPut]:
+               rsi_14: float = 50.0,
+               expected_move: float | None = None,
+               iv_rank: float | None = None,
+               dividend_yield: float = 0.0) -> list[CashSecuredPut]:
     """All OTM puts in the chain that pass liquidity/delta filters."""
     out = []
     t = _t_years(chain.dte)
@@ -115,7 +129,7 @@ def build_csps(chain: ChainSnapshot, *, min_dte_ok: bool = True,
         if q.spread_pct > max_spread_pct:
             continue
         try:
-            delta = bs.put_delta(chain.spot, q.strike, q.iv, t)
+            delta = bs.put_delta(chain.spot, q.strike, q.iv, t, q=dividend_yield)
         except ValueError:
             continue
         if not (delta_range[0] <= abs(delta) <= delta_range[1]):
@@ -128,7 +142,8 @@ def build_csps(chain: ChainSnapshot, *, min_dte_ok: bool = True,
             earnings_before_expiry=earnings_before_expiry,
             entry_signals=entry_signals,
             multiplier=chain.multiplier, margin_estimate=margin_estimate,
-            rsi_14=rsi_14,
+            rsi_14=rsi_14, expected_move=expected_move, iv_rank=iv_rank,
+            dividend_yield=dividend_yield,
         ))
     return out
 

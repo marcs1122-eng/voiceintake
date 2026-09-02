@@ -519,3 +519,146 @@ def test_scalp_demo_scan_runs_offline():
         if idle:
             seen_idle = True
         assert not (seen_idle and not idle), "actionable row sorted below idle row"
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 — numbers that agree with the chart
+# ---------------------------------------------------------------------------
+
+def _walk(n=300, seed=11, start=100.0):
+    import random
+    rng = random.Random(seed)
+    out, p = [], start
+    for _ in range(n):
+        p *= 1 + rng.gauss(0.0004, 0.012)
+        out.append(p)
+    return out
+
+
+def test_wilder_rsi_matches_reference_rma():
+    """Wilder's RSI = RMA(gain)/RMA(loss). Reference: pandas ewm with
+    alpha = 1/14, adjust=False, which is what TradingView's ta.rsi does."""
+    import pandas as pd
+    from scanner.data import _rsi
+
+    closes = _walk()
+    s = pd.Series(closes)
+    d = s.diff().dropna()
+    gain = d.clip(lower=0.0)
+    loss = (-d).clip(lower=0.0)
+    rma_g = gain.ewm(alpha=1 / 14, adjust=False).mean().iloc[-1]
+    rma_l = loss.ewm(alpha=1 / 14, adjust=False).mean().iloc[-1]
+    ref = 100 - 100 / (1 + rma_g / rma_l)
+    assert _rsi(closes, 14) == pytest.approx(ref, abs=0.3)
+
+
+def test_rsi_is_not_cutler_anymore():
+    """The old 14-bar simple average differs from Wilder by several points
+    on the same series — make sure we are no longer computing it."""
+    from scanner.data import _rsi
+
+    closes = _walk(seed=5)
+    g = l = 0.0
+    for i in range(1, 15):
+        diff = closes[-i] - closes[-i - 1]
+        g += max(diff, 0); l += max(-diff, 0)
+    cutler = 100 - 100 / (1 + (g / 14) / (l / 14))
+    assert abs(_rsi(closes, 14) - cutler) > 0.5
+
+
+def test_rsi_flat_series_is_neutral():
+    from scanner.data import _rsi
+    assert _rsi([100.0] * 60, 14) == 50.0
+
+
+def test_bollinger_uses_population_std():
+    import statistics
+    from scanner.data import signal_stats
+
+    closes = _walk(n=80, seed=3)
+    _, _, lower, upper = signal_stats(closes, closes[-1])
+    last20 = closes[-20:]
+    mid = statistics.fmean(last20)
+    sd = statistics.pstdev(last20)          # population, like TradingView
+    assert lower == pytest.approx(mid - 2 * sd, rel=1e-9)
+    assert upper == pytest.approx(mid + 2 * sd, rel=1e-9)
+    assert abs(sd - statistics.stdev(last20)) > 1e-9   # would differ if sample
+
+
+def test_parallel_scan_matches_sequential():
+    from scanner.scan import score_csp
+
+    universe = DEFAULT_UNIVERSE[:16]
+    tags = {s.ticker: s.tags for s in universe}
+    seq = run_scan(SyntheticProvider(), universe,
+                   ScanConfig(min_annualized_pct=0.0, max_workers=1))
+    par = run_scan(SyntheticProvider(), universe,
+                   ScanConfig(min_annualized_pct=0.0, max_workers=8))
+
+    def key(c):
+        return (c.ticker, c.expiry, c.strike)
+    assert [key(c) for c in seq.csps] == [key(c) for c in par.csps]
+    assert list(seq.infos) == list(par.infos)          # universe order kept
+    assert ([score_csp(c, tags[c.ticker], ScanConfig()) for c in seq.csps]
+            == [score_csp(c, tags[c.ticker], ScanConfig()) for c in par.csps])
+    assert not seq.errors and not par.errors
+
+
+def test_progress_callback_fires_once_per_symbol():
+    seen = []
+    universe = DEFAULT_UNIVERSE[:7]
+    run_scan(SyntheticProvider(), universe, ScanConfig(max_workers=4),
+             progress=lambda i, n, t: seen.append((i, n, t)))
+    assert len(seen) == 7
+    assert {t for _, _, t in seen} == {s.ticker for s in universe}
+    assert sorted(i for i, _, _ in seen) == list(range(7))
+
+
+def test_score_v2_rewards_ivr_and_expected_move_cushion():
+    import dataclasses
+    from scanner.scan import score_csp
+
+    base = build_csps(_chain(), delta_range=(0.05, 0.6))[0]
+    cfg = ScanConfig()
+    plain = score_csp(base, frozenset(), cfg)          # no IVR, no EM: unchanged
+    rich = dataclasses.replace(base, iv_rank=80.0)
+    cheap = dataclasses.replace(base, iv_rank=10.0)
+    assert score_csp(rich, frozenset(), cfg) > plain
+    assert score_csp(cheap, frozenset(), cfg) < plain   # <20 IVR is penalized
+    # strike a full expected move away beats one inside it
+    em = (base.spot - base.strike) / 1.2                # cushion = 1.2 EM
+    far = dataclasses.replace(base, expected_move=em)
+    near = dataclasses.replace(base, expected_move=em * 3)   # cushion = 0.4 EM
+    assert far.em_cushion == pytest.approx(1.2)
+    assert score_csp(far, frozenset(), cfg) == pytest.approx(plain + 6.0)
+    assert score_csp(near, frozenset(), cfg) == pytest.approx(plain)
+
+
+def test_expected_move_and_dividend_yield():
+    from scanner.data import UnderlyingInfo
+
+    assert bs.expected_move(100.0, 0.30, 30) == pytest.approx(100 * 0.30 * (30 / 365) ** 0.5)
+    assert bs.expected_move(100.0, 0.0, 30) == 0.0
+    # a dividend lowers the forward: the put is worth more and its delta
+    # is further from zero
+    d0 = bs.put_delta(100, 90, 0.3, 45 / 365)
+    dq = bs.put_delta(100, 90, 0.3, 45 / 365, q=0.04)
+    assert abs(dq) > abs(d0)
+    assert bs.put_price(100, 90, 0.3, 45 / 365, q=0.04) > bs.put_price(100, 90, 0.3, 45 / 365)
+    # q=0 reproduces the classic formula exactly
+    assert bs.put_price(100, 90, 0.3, 0.25, q=0.0) == bs.put_price(100, 90, 0.3, 0.25)
+    info = UnderlyingInfo(ticker="X", spot=200.0, day_change_pct=0, pct_off_52w_high=0,
+                          hist_vol_20d=0.25, rsi_14=50, iv_index=0.40)
+    assert info.expected_move(30) == pytest.approx(bs.expected_move(200, 0.40, 30))
+    info.iv_index = None                                 # falls back to realized vol
+    assert info.expected_move(30) == pytest.approx(bs.expected_move(200, 0.25, 30))
+
+
+def test_scan_carries_ivr_and_expected_move_onto_puts():
+    universe = filter_universe(DEFAULT_UNIVERSE, tickers={"SPY", "AAPL", "KO"})
+    result = run_scan(SyntheticProvider(), universe, ScanConfig(min_annualized_pct=0.0))
+    assert result.csps
+    for c in result.csps:
+        assert c.iv_rank is not None and 0 <= c.iv_rank <= 100
+        assert c.expected_move and c.expected_move > 0
+        assert c.em_cushion is not None and c.em_cushion > 0

@@ -72,6 +72,25 @@ class UnderlyingInfo:
     day_high: float = 0.0          # today's session high
     day_low: float = 0.0           # today's session low
 
+    # --- volatility context (tastytrade market metrics when live; the Yahoo
+    #     path fills iv_rank with a realized-vol rank as a labelled proxy) ---
+    iv_rank: float | None = None        # 0-100: where current IV sits in its 1-yr range
+    iv_percentile: float | None = None  # 0-100: % of days in the past year IV was lower
+    iv_index: float | None = None       # current implied vol, 0.32 = 32%
+    hv_30: float | None = None          # 30-day realized vol
+    beta: float | None = None
+    corr_spy: float | None = None       # 3-month correlation to SPY
+    liquidity_rating: int | None = None # tastytrade 1 (worst) .. 4 (best)
+    dividend_yield: float = 0.0         # annual, 0.03 = 3%
+    iv_source: str = ""                 # "tastytrade" | "hv-proxy" | ""
+
+    def expected_move(self, dte: int, iv: float | None = None) -> float:
+        """1-sigma move to expiry in price units. Uses the given IV, else
+        the IV index, else realized vol as a last resort."""
+        from . import bs
+        vol = iv or self.iv_index or self.hist_vol_20d
+        return bs.expected_move(self.spot, vol or 0.0, dte)
+
     @property
     def at_day_low(self) -> bool:
         """Within 0.3% of today's low — scalp-entry zone for premium sellers."""
@@ -101,6 +120,15 @@ class UnderlyingInfo:
 
 class DataProvider:
     """Interface both providers implement."""
+
+    def prefetch(self, tickers: list[str]) -> None:
+        """Optional bulk warm-up before a scan (e.g. one market-metrics call
+        for the whole universe). Default: nothing."""
+
+    def expiry_iv(self, ticker: str, expiry: dt.date) -> float | None:
+        """Provider-supplied ATM implied vol for one expiration, if it has
+        one (tastytrade does). None → the scan derives it from the chain."""
+        return None
 
     def underlying(self, ticker: str) -> UnderlyingInfo:
         raise NotImplementedError
@@ -150,7 +178,7 @@ class YFinanceProvider(DataProvider):
         if ticker in self._info_cache:
             return self._info_cache[ticker]
         t = self._ticker(ticker)
-        hist = t.history(period="1y", auto_adjust=True)
+        hist = t.history(period="1y", auto_adjust=True, actions=True)
         if hist.empty:
             raise ValueError(f"no price history for {ticker}")
         close = hist["Close"]
@@ -163,6 +191,27 @@ class YFinanceProvider(DataProvider):
         rets = close.pct_change().dropna()
         recent = rets.tail(20)
         hv20 = float(recent.std() * math.sqrt(TRADING_DAYS)) if len(recent) > 2 else 0.0
+
+        # Realized-vol rank as a stand-in for IV rank when no options-data
+        # source is live: where today's 20d HV sits in its 1-year range.
+        hv_rank, hv30 = None, None
+        try:
+            roll = rets.rolling(20).std().dropna() * math.sqrt(TRADING_DAYS)
+            if len(roll) >= 40:
+                lo, hi = float(roll.min()), float(roll.max())
+                hv_rank = (hv20 - lo) / (hi - lo) * 100.0 if hi > lo else 50.0
+            last30 = rets.tail(30)
+            hv30 = float(last30.std() * math.sqrt(TRADING_DAYS)) if len(last30) > 2 else None
+        except Exception:
+            pass
+        # trailing-12-month dividend yield from the same history call (no
+        # extra request); zero for non-payers and futures
+        div_yield = 0.0
+        try:
+            if "Dividends" in hist.columns and spot > 0:
+                div_yield = float(hist["Dividends"].sum()) / spot
+        except Exception:
+            pass
 
         last_bar = hist.iloc[-1]
         day_high = float(last_bar.get("High", 0) or 0)
@@ -205,7 +254,10 @@ class YFinanceProvider(DataProvider):
                               next_earnings, expiries,
                               sma_50=sma_50, boll_lower=boll_lower,
                               boll_upper=boll_upper,
-                              day_high=day_high, day_low=day_low)
+                              day_high=day_high, day_low=day_low,
+                              iv_rank=hv_rank, hv_30=hv30,
+                              dividend_yield=div_yield,
+                              iv_source="hv-proxy" if hv_rank is not None else "")
         self._info_cache[ticker] = info
         return info
 
@@ -244,31 +296,40 @@ def _is_nan(x) -> bool:
 
 
 def signal_stats(closes: list[float], spot: float) -> tuple[float, float, float, float]:
-    """(rsi14, sma50, boll_lower, boll_upper) from a close series on any timeframe."""
-    rsi = _rsi(closes[-60:], 14)
+    """(rsi14, sma50, boll_lower, boll_upper) from a close series on any timeframe.
+
+    Matches TradingView's defaults so the scanner's numbers agree with the
+    chart: Wilder-smoothed RSI (fed ~250 bars so the smoothing converges)
+    and Bollinger Bands on the population standard deviation."""
+    rsi = _rsi(closes[-260:], 14)
     sma_50 = sum(closes[-50:]) / 50.0 if len(closes) >= 50 else spot
     last20 = closes[-20:]
     if len(last20) >= 20:
         mid = sum(last20) / len(last20)
-        var = sum((c - mid) ** 2 for c in last20) / (len(last20) - 1)
+        var = sum((c - mid) ** 2 for c in last20) / len(last20)   # population, as TV
         sd = var ** 0.5
         return rsi, sma_50, mid - 2 * sd, mid + 2 * sd
     return rsi, sma_50, 0.0, 0.0
 
 
 def _rsi(closes: list[float], period: int = 14) -> float:
+    """Wilder's RSI: seed with a simple average of the first `period` moves,
+    then smooth recursively with alpha = 1/period (an RMA). This is what
+    TradingView, tastytrade and thinkorswim compute; the plain 14-bar
+    average (Cutler's RSI) the scanner used before differed by several
+    points on the same bar."""
     if len(closes) < period + 1:
         return 50.0
-    gains, losses = 0.0, 0.0
-    for i in range(1, period + 1):
-        diff = closes[-i] - closes[-i - 1]
-        if diff >= 0:
-            gains += diff
-        else:
-            losses -= diff
-    if losses == 0:
-        return 100.0
-    rs = (gains / period) / (losses / period)
+    gains = [max(closes[i] - closes[i - 1], 0.0) for i in range(1, len(closes))]
+    losses = [max(closes[i - 1] - closes[i], 0.0) for i in range(1, len(closes))]
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    for g, l in zip(gains[period:], losses[period:]):
+        avg_gain = (avg_gain * (period - 1) + g) / period
+        avg_loss = (avg_loss * (period - 1) + l) / period
+    if avg_loss == 0:
+        return 100.0 if avg_gain > 0 else 50.0
+    rs = avg_gain / avg_loss
     return 100.0 - 100.0 / (1.0 + rs)
 
 
@@ -319,6 +380,12 @@ class SyntheticProvider(DataProvider):
             boll_upper=round(spot * rng.uniform(1.03, 1.10), 2),
             day_high=round(spot * rng.uniform(1.001, 1.03), 2),
             day_low=round(spot * rng.uniform(0.97, 0.999), 2),
+            iv_rank=round(rng.uniform(5, 95), 1),
+            iv_percentile=round(rng.uniform(5, 95), 1),
+            iv_index=iv, hv_30=round(iv * rng.uniform(0.6, 1.0), 3),
+            beta=round(rng.uniform(0.4, 1.8), 2),
+            dividend_yield=round(rng.choice([0.0, 0.0, 0.015, 0.03, 0.045]), 3),
+            liquidity_rating=rng.randint(1, 4), iv_source="synthetic",
         )
 
     def chain(self, ticker: str, expiry: dt.date) -> ChainSnapshot:

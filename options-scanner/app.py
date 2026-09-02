@@ -232,9 +232,14 @@ with tab_plan:
                 m2.metric("Annualized", f"{c.annualized_pct:.0f}%")
                 m3.metric("Prob. worthless", f"{c.prob_otm_pct:.0f}%")
                 m4.metric("Breakeven", f"{c.breakeven:,.2f}")
+                vol_txt = ""
+                if c.iv_rank is not None:
+                    vol_txt += f" · IVR {c.iv_rank:.0f}"
+                if c.em_cushion is not None:
+                    vol_txt += f" · strike {c.em_cushion:.1f}× the expected move"
                 st.caption(f"Ties up \\${c.capital:,.0f} "
                            f"{'margin' if c.is_futures else 'cash'} · "
-                           f"{c.downside_protection_pct:.1f}% cushion · "
+                           f"{c.downside_protection_pct:.1f}% cushion{vol_txt} · "
                            f"why now: {why_txt} · score {s}")
 
         # -- One defined-risk idea --
@@ -283,10 +288,11 @@ with tab_csp:
             "Score": score_csp(c, _tags.get(c.ticker, frozenset()), _cfg),
             "Ticker": c.ticker, "Spot": round(c.spot, 2),
             "RSI": round(c.rsi_14, 1),
+            "IVR": round(c.iv_rank) if c.iv_rank is not None else None,
             "Day Lo": round(result.infos[c.ticker].day_low, 2) if c.ticker in result.infos else None,
             "Day Hi": round(result.infos[c.ticker].day_high, 2) if c.ticker in result.infos else None,
             "@Day": _day_flag(c.ticker),
-            "Expiry": str(c.expiry),
+            "Expiry": c.expiry.strftime("%m/%d/%Y"),
             "DTE": c.dte, "Strike": c.strike, "Mid": c.mid,
             "Premium/ct $": round(c.premium),
             "Capital $": round(c.capital),
@@ -294,6 +300,8 @@ with tab_csp:
             "ROC %": round(c.roc_pct, 2), "Annualized %": round(c.annualized_pct, 1),
             "Breakeven": round(c.breakeven, 2),
             "Cushion %": round(c.downside_protection_pct, 1),
+            "EM $": round(c.expected_move, 2) if c.expected_move else None,
+            "Strike/EM": round(c.em_cushion, 2) if c.em_cushion is not None else None,
             "Delta": round(abs(c.delta), 2), "P(OTM) %": round(c.prob_otm_pct),
             "IV %": round(c.iv * 100), "OI": c.open_interest,
             "Signals": " + ".join(sorted(c.entry_signals)),
@@ -310,7 +318,7 @@ with tab_ic:
     else:
         df = pd.DataFrame([{
             "Score": score_condor(c, _cfg), "Ticker": c.ticker,
-            "Spot": round(c.spot, 2), "Expiry": str(c.expiry), "DTE": c.dte,
+            "Spot": round(c.spot, 2), "Expiry": c.expiry.strftime("%m/%d/%Y"), "DTE": c.dte,
             "Put wing": f"{c.put_long:g}/{c.put_short:g}",
             "Call wing": f"{c.call_short:g}/{c.call_long:g}",
             "Credit $": round(c.credit_dollars), "Max loss $": round(c.max_loss_dollars),
@@ -329,7 +337,7 @@ with tab_bwb:
     else:
         df = pd.DataFrame([{
             "Score": score_bwb(b, _cfg), "Ticker": b.ticker,
-            "Spot": round(b.spot, 2), "Expiry": str(b.expiry), "DTE": b.dte,
+            "Spot": round(b.spot, 2), "Expiry": b.expiry.strftime("%m/%d/%Y"), "DTE": b.dte,
             "Legs": f"+1 {b.long_low:g}p / -2 {b.short_mid:g}p / +1 {b.long_high:g}p",
             "Credit(+)/Debit(-) $": round(b.net_credit * 100),
             "Max profit $": round(b.max_profit * 100),
