@@ -169,9 +169,10 @@ else:
 
 NEED_SCAN = "Run the income scan first (sidebar → **Run scan**)."
 
-tab_plan, tab_csp, tab_ic, tab_bwb, tab_dip, tab_scalp, tab_score, tab_pos, tab_corr = st.tabs(
+(tab_plan, tab_csp, tab_ic, tab_bwb, tab_dip, tab_scalp, tab_news, tab_score, tab_pos,
+ tab_corr) = st.tabs(
     ["📋 Trade Plan", "📉 Puts / Wheel", "🦅 Iron Condors", "🦋 Broken Wing Flies",
-     "🔻 Quality Dips", "⚡ Scalp", "📈 Scorecard", "💼 Positions", "🔗 Correlation"])
+     "🔻 Quality Dips", "⚡ Scalp", "📰 News", "📈 Scorecard", "💼 Positions", "🔗 Correlation"])
 
 _tags = {s.ticker: s.tags for s in universe} if have_result else {}
 _tags_all = {s.ticker: s.tags for s in DEFAULT_UNIVERSE}   # sector lookup for held names too
@@ -899,3 +900,78 @@ with tab_pos:
                             } for x in _rolls]), hide_index=True, use_container_width=True)
         except Exception as exc:
             st.error(f"Couldn't load positions: {exc}")
+
+with tab_news:
+    from scanner import news as _news
+    from scanner.rules import futures_root as _fr
+    st.caption("Free public feeds — CNBC, MarketWatch, Yahoo Finance, the Federal Reserve — "
+               "plus a search for every name you hold or that today's scan picked. "
+               "🔴 market-moving · 🟡 notable · ⚪ the rest. Refreshes every 10 minutes; "
+               "no scan needed.")
+
+    @st.cache_data(ttl=600, show_spinner="Pulling headlines…")
+    def _pull_news(feed_names: tuple, watch: tuple):
+        return _news.fetch_all({k: _news.FEEDS[k] for k in feed_names}, list(watch))
+
+    # names to watch: the book (cached 10 min) + today's put candidates + anything typed
+    _watch: list[str] = []
+    if TASTY_AVAILABLE:
+        try:
+            _hc = st.session_state.get("held_cache")
+            if not _hc or (_dt.datetime.now() - _hc[0]).total_seconds() > 600:
+                from scanner.tastytrade_provider import TastytradeProvider as _TPn
+                from scanner.tastytrade_provider import get_positions as _gpn
+                _hc = (_dt.datetime.now(),
+                       sorted({r["underlying"] for r in _gpn(_TPn().session) if r.get("underlying")}))
+                st.session_state.held_cache = _hc
+            _watch += _hc[1]
+        except Exception:
+            pass
+    if have_result:
+        for c in result.csps:
+            if c.ticker not in _watch:
+                _watch.append(c.ticker)
+            if len(_watch) >= 25:
+                break
+    _n1, _n2, _n3 = st.columns([3, 2, 1])
+    _srcs = _n1.multiselect("Feeds", list(_news.FEEDS), default=list(_news.FEEDS), key="news_feeds")
+    _extra = _n2.text_input("Also watch (comma-separated)", "", key="news_extra")
+    if _n3.button("🔄 Refresh", key="news_refresh"):
+        _pull_news.clear()
+    for _t in _extra.split(","):
+        _t = _t.strip().upper()
+        if _t and _t not in _watch:
+            _watch.append(_t)
+    _watch = list(dict.fromkeys(_fr(t) if t.startswith("/") else t for t in _watch))
+
+    _items, _errs = _pull_news(tuple(_srcs), tuple(_watch))
+
+    def _headline(i):
+        t = i.title.replace("[", "(").replace("]", ")").replace("$", "＄")
+        meta = " · ".join(x for x in (i.source, i.age()) if x)
+        tk = " ".join(f"`{x}`" for x in i.tickers[:4])
+        body = f"[{t}]({i.link})" if i.link else t
+        st.markdown(f"{i.icon} {body} — {meta} {tk}")
+
+    if _errs:
+        st.caption("Couldn't reach: " + ", ".join(sorted(_errs)))
+    if not _items:
+        st.info("No headlines came back. Check the feed list, or hit Refresh in a minute.")
+    else:
+        _b = _news.split(_items, _watch)
+        st.subheader("🔴 Market-moving")
+        if _b["move"]:
+            for i in _b["move"][:12]:
+                _headline(i)
+        else:
+            st.write("Nothing big on the tape right now.")
+        st.subheader("📌 Your names")
+        if _b["mine"]:
+            for i in _b["mine"][:20]:
+                _headline(i)
+        else:
+            st.write("No headlines on names you hold or on today's picks.")
+        st.subheader("📰 Latest")
+        for i in _b["rest"][:30]:
+            _headline(i)
+        st.caption(f"{len(_items)} headlines · watching " + (", ".join(_watch[:12]) or "nothing yet — run a scan or type a name above"))

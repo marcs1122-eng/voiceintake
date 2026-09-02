@@ -963,3 +963,55 @@ def test_presentation_layer():
     assert len(brief["candidates"]) == 3 and all(k in brief["candidates"][0] for k in ("ticker", "spot", "rsi", "zone", "signals"))
     assert brief["posture"]["rows"][0]["sym"] == "/ES"
     assert "footer" in brief
+
+
+def test_news_parse_score_and_split():
+    import datetime as _d
+    from scanner import news
+
+    rss = b"""<?xml version="1.0"?><rss version="2.0"><channel>
+      <item><title>Fed holds rates steady, Powell flags tariff risk to inflation</title>
+        <link>https://x/1</link><pubDate>Wed, 02 Sep 2026 14:05:00 GMT</pubDate></item>
+      <item><title>Apple unveils new iPhone; shares slip</title>
+        <link>https://x/2</link><pubDate>Wed, 02 Sep 2026 13:00:00 GMT</pubDate></item>
+      <item><title>Fed holds rates steady, Powell flags tariff risk to inflation</title>
+        <link>https://x/dup</link><pubDate>Wed, 02 Sep 2026 14:00:00 GMT</pubDate></item>
+      <item><title>Local bakery wins award</title><link>https://x/3</link>
+        <pubDate>Tue, 01 Sep 2026 09:00:00 GMT</pubDate></item>
+      <item><title>TJX falls for a fifth day as off-price retail sells off - Reuters</title>
+        <link>https://x/4</link><source url="https://reuters.com">Reuters</source>
+        <pubDate>Wed, 02 Sep 2026 14:50:00 GMT</pubDate></item>
+    </channel></rss>"""
+    atom = b"""<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom">
+      <entry><title>Crude jumps 4% as OPEC surprises with cut</title>
+        <link href="https://x/5"/><published>2026-09-02T14:30:00Z</published></entry></feed>"""
+    items = news.parse(rss, "CNBC") + news.parse(atom, "Fed")
+    assert len(items) == 6
+    tjx = next(i for i in items if i.title.startswith("TJX"))
+    assert tjx.source == "Reuters" and " - Reuters" not in tjx.title
+    assert items[0].published == _d.datetime(2026, 9, 2, 14, 5, tzinfo=_d.timezone.utc)
+
+    now = _d.datetime(2026, 9, 2, 15, 0, tzinfo=_d.timezone.utc)
+    ranked = news.rank(items, watch=["TJX", "/CL"], now=now)
+    assert len(ranked) == 5                          # duplicate Fed headline dropped
+    by = {i.title[:5]: i for i in ranked}
+    assert by["Fed h"].level == "move" and "fomc" not in by["Fed h"].tags and "tariff" in by["Fed h"].tags
+    assert "TJX" in by["TJX f"].tickers and "your name" in by["TJX f"].tags and by["TJX f"].score >= 6
+    assert "/CL" in by["Crude"].tickers and by["Crude"].level == "move"
+    assert "AAPL" in by["Apple"].tickers and by["Apple"].level != "move"
+    assert by["Local"].level == "info" and by["Local"].tickers == []
+    assert ranked[0].score >= ranked[-1].score
+    assert by["TJX f"].age(now) == "10m" and by["Local"].age(now) == "30h"
+
+    buckets = news.split(ranked, watch=["TJX", "/CL"])
+    assert set(buckets) == {"move", "mine", "rest"}
+    assert by["Local"] in buckets["rest"] and by["Apple"] in buckets["rest"]
+    assert all(i.level == "move" for i in buckets["move"])
+    assert sum(len(v) for v in buckets.values()) == len(ranked)
+
+    # stoplist: uppercase words that are not tickers, unless written as $XYZ
+    assert news.tag_tickers("AI stocks rally as CEO of IT firm resigns") == []
+    assert news.tag_tickers("$SO breaks out") == ["SO"]
+    assert "HD" in news.tag_tickers("Home Depot beats on earnings")
+    assert "NVDA" in news.tag_tickers("NVDA slides 3%")
+    assert "TJX" in news.ticker_feed("TJX") and "Treasury" in news.ticker_feed("/ZN")

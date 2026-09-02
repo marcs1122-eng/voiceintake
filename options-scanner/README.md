@@ -146,3 +146,12 @@ The JSON schema is documented in the script's docstring: `title`, `date`,
 (ticker / spot / rsi / signals / zone / size), `loud`, `avoid`, `todo`,
 `footer`. Every section except title/date is optional and simply omitted
 from the sheet when absent.
+
+## News tab
+
+Free public RSS feeds (CNBC, MarketWatch, Yahoo Finance, the Federal Reserve)
+plus a Google News search for every name you hold or that today's scan picked.
+Headlines are scored — macro words (Fed, CPI, jobs, tariffs, oil) and mentions
+of your names score highest — and split into market-moving, your names, and
+the rest. No API key; refreshes every 10 minutes. Scoring lives in
+`scanner/news.py` and is unit-tested against sample feed data.
