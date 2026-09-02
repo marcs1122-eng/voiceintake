@@ -221,9 +221,36 @@ def due_labels(p: Pick, today: dt.date) -> list[str]:
     return out
 
 
+def due(picks: list[Pick], today: dt.date | None = None) -> dict[str, dict]:
+    """{ticker: {"since": earliest picked_on, "labels": [...]}} for every pick
+    with a grade outstanding — what a grader needs to go fetch."""
+    today = today or dt.date.today()
+    out: dict[str, dict] = {}
+    for p in picks:
+        labels = due_labels(p, today)
+        if not labels:
+            continue
+        d = out.setdefault(p.ticker, {"since": p.picked_on, "labels": []})
+        d["since"] = min(d["since"], p.picked_on)
+        d["labels"] = sorted(set(d["labels"]) | set(labels))
+    return out
+
+
+def _apply_grades(p: Pick, labels: list[str], spot_now: float,
+                  low: float | None, today: dt.date) -> int:
+    n = 0
+    for label in labels:
+        on = today if label == "expiry" else dt.date.fromisoformat(p.picked_on) + dt.timedelta(days=int(label))
+        on = min(on, today)
+        p.grades[label] = grade_one(p, label, spot_now, low, on)
+        n += 1
+    return n
+
+
 def grade(picks: list[Pick], provider: DataProvider,
           today: dt.date | None = None) -> int:
-    """Fill in every grade that has come due. Returns how many were added."""
+    """Fill in every grade that has come due, pulling prices from a data
+    provider. Returns how many grades were added."""
     today = today or dt.date.today()
     added = 0
     for p in picks:
@@ -237,11 +264,27 @@ def grade(picks: list[Pick], provider: DataProvider,
         except Exception as exc:
             p.grades.setdefault("error", str(exc))
             continue
-        for label in labels:
-            on = today if label == "expiry" else dt.date.fromisoformat(p.picked_on) + dt.timedelta(days=int(label))
-            on = min(on, today)
-            p.grades[label] = grade_one(p, label, spot_now, low, on)
-            added += 1
+        added += _apply_grades(p, labels, spot_now, low, today)
+    return added
+
+
+def grade_with_quotes(picks: list[Pick], quotes: dict[str, dict],
+                      today: dt.date | None = None) -> int:
+    """Same as grade(), but prices come from a caller-supplied
+    {ticker: {"spot": x, "low_since": y}} — for environments that can reach
+    a quote feed but not a Python data provider (the scheduled routines
+    fetch these from TradingView). Picks whose ticker is missing are left
+    for next time."""
+    today = today or dt.date.today()
+    added = 0
+    for p in picks:
+        labels = due_labels(p, today)
+        q = quotes.get(p.ticker)
+        if not labels or not q or q.get("spot") in (None, 0):
+            continue
+        low = q.get("low_since")
+        added += _apply_grades(p, labels, float(q["spot"]),
+                               float(low) if low is not None else None, today)
     return added
 
 
@@ -312,11 +355,22 @@ def main(argv=None) -> int:
     r.add_argument("--path", default=str(DEFAULT_PATH))
     g = sub.add_parser("grade", help="grade every pick that has come due")
     g.add_argument("--source", default="yahoo", choices=["demo", "yahoo", "tasty"])
+    g.add_argument("--quotes", help='JSON {ticker: {"spot": x, "low_since": y}} '
+                                    "instead of a data provider")
+    g.add_argument("--today", help="grade as of this date (YYYY-MM-DD); default today")
     g.add_argument("--path", default=str(DEFAULT_PATH))
+    d = sub.add_parser("due", help="list tickers with a grade outstanding (JSON)")
+    d.add_argument("--today", help="as of this date (YYYY-MM-DD); default today")
+    d.add_argument("--path", default=str(DEFAULT_PATH))
     s = sub.add_parser("show", help="print the scorecard")
     s.add_argument("--path", default=str(DEFAULT_PATH))
     a = ap.parse_args(argv)
     path = pathlib.Path(a.path)
+    as_of = dt.date.fromisoformat(a.today) if getattr(a, "today", None) else None
+
+    if a.cmd == "due":
+        print(json.dumps(due(load(path), as_of), indent=2))
+        return 0
 
     if a.cmd == "record":
         if a.from_brief:
@@ -335,7 +389,10 @@ def main(argv=None) -> int:
             print(f"  {p.picked_on} {p.ticker:6s} {p.strike:g}P exp {p.expiry}  score {p.score:g}")
     elif a.cmd == "grade":
         picks = load(path)
-        n = grade(picks, _provider(a.source))
+        if a.quotes:
+            n = grade_with_quotes(picks, json.load(open(a.quotes)), as_of)
+        else:
+            n = grade(picks, _provider(a.source), as_of)
         save(picks, path)
         print(f"graded {n} horizon(s) across {len(picks)} pick(s)")
     else:

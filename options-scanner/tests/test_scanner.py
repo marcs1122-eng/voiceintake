@@ -825,3 +825,33 @@ def test_candidate_fit_and_labels():
     assert "adds diversification" in corr.fit_label(0.1)
     assert corr.fit_label(None) == "no book data"
     assert corr.candidate_fit(["B"], []) == {"B": None}
+
+
+def test_track_due_and_grade_with_quotes(tmp_path):
+    import json
+    from scanner import track
+
+    p1 = track.Pick(picked_on="2026-09-01", ticker="TJX", strategy="short put", strike=125.0,
+                    expiry="2026-10-16", dte=45, spot=133.0, mid=3.0, iv=0.35)
+    p2 = track.Pick(picked_on="2026-09-01", ticker="SO", strategy="short put", strike=85.0,
+                    expiry="2026-10-16", dte=45, spot=88.0, mid=1.5, iv=0.22)
+    today = dt.date(2026, 9, 16)                     # 15 days on: 7 and 14 due, 30 not
+    d = track.due([p1, p2], today)
+    assert set(d) == {"TJX", "SO"} and d["TJX"]["labels"] == ["14", "7"]
+    quotes = {"TJX": {"spot": 138.0, "low_since": 130.5}}          # no SO quote yet
+    n = track.grade_with_quotes([p1, p2], quotes, today)
+    assert n == 2 and set(p1.grades) == {"7", "14"} and not p2.grades
+    assert p1.grades["14"]["otm"] and not p1.grades["14"]["tested"]
+    assert p1.grades["14"]["pct_of_max"] > 0
+    assert track.due([p1, p2], today) == {"SO": {"since": "2026-09-01", "labels": ["14", "7"]}}
+
+    # CLI: record from brief -> due -> grade --quotes -> show
+    path = tmp_path / "t.jsonl"
+    track.save([p1, p2], path)
+    q = tmp_path / "q.json"
+    q.write_text(json.dumps({"SO": {"spot": 86.0, "low_since": 84.9}}))
+    assert track.main(["grade", "--quotes", str(q), "--today", "2026-09-16", "--path", str(path)]) == 0
+    reloaded = {p.ticker: p for p in track.load(path)}
+    assert reloaded["SO"].grades and reloaded["SO"].grades["7"]["tested"]   # low 84.9 < 85 strike
+    assert set(reloaded["SO"].grades) == {"7", "14"}
+    assert track.main(["due", "--today", "2026-09-16", "--path", str(path)]) == 0
