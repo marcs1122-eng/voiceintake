@@ -130,6 +130,11 @@ class DataProvider:
         one (tastytrade does). None → the scan derives it from the chain."""
         return None
 
+    def history_lows(self, ticker: str, since: dt.date) -> float | None:
+        """Lowest trade since `since` (inclusive) — used by the track record
+        to tell whether a short strike was ever tested. None if unknown."""
+        return None
+
     def underlying(self, ticker: str) -> UnderlyingInfo:
         raise NotImplementedError
 
@@ -261,6 +266,15 @@ class YFinanceProvider(DataProvider):
         self._info_cache[ticker] = info
         return info
 
+    def history_lows(self, ticker: str, since: dt.date) -> float | None:
+        try:
+            hist = self._ticker(ticker).history(start=since.isoformat(), auto_adjust=True)
+            if hist.empty or "Low" not in hist.columns:
+                return None
+            return float(hist["Low"].min())
+        except Exception:
+            return None
+
     def chain(self, ticker: str, expiry: dt.date) -> ChainSnapshot:
         t = self._ticker(ticker)
         oc = t.option_chain(expiry.isoformat())
@@ -387,6 +401,12 @@ class SyntheticProvider(DataProvider):
             dividend_yield=round(rng.choice([0.0, 0.0, 0.015, 0.03, 0.045]), 3),
             liquidity_rating=rng.randint(1, 4), iv_source="synthetic",
         )
+
+    def history_lows(self, ticker: str, since: dt.date) -> float | None:
+        # deterministic: the low since any date is 3-9% under spot,
+        # seeded per ticker so tests are repeatable
+        spot, _ = self._spot_iv(ticker)
+        return round(spot * (1.0 - self._rng(ticker + ":low").uniform(0.03, 0.09)), 2)
 
     def chain(self, ticker: str, expiry: dt.date) -> ChainSnapshot:
         rng = self._rng(ticker)

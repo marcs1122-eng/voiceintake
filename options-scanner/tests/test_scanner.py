@@ -662,3 +662,166 @@ def test_scan_carries_ivr_and_expected_move_onto_puts():
         assert c.iv_rank is not None and 0 <= c.iv_rank <= 100
         assert c.expected_move and c.expected_move > 0
         assert c.em_cushion is not None and c.em_cushion > 0
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — track record, rulebook, book-aware picks
+# ---------------------------------------------------------------------------
+
+def test_track_record_roundtrip(tmp_path):
+    from scanner import track
+
+    universe = DEFAULT_UNIVERSE[:20]
+    tags = {s.ticker: s.tags for s in universe}
+    res = run_scan(SyntheticProvider(), universe, ScanConfig(min_annualized_pct=0.0))
+    today = dt.date(2026, 9, 2)
+    picks = track.picks_from_scan(res, tags, top_n=5, min_score=0.0, min_prob=0.0, today=today)
+    assert 1 <= len(picks) <= 5
+    assert len({p.ticker for p in picks}) == len(picks)          # one per ticker
+    assert all(p.sector for p in picks) and all(p.iv > 0 for p in picks)
+
+    path = tmp_path / "tr.jsonl"
+    assert track.record(picks, path) == len(picks)
+    assert track.record(picks, path) == 0                        # dedupe
+    loaded = track.load(path)
+    assert [p.key for p in loaded] == [p.key for p in picks]
+
+    # nothing is due the day it is picked
+    assert track.grade(loaded, SyntheticProvider(), today=today) == 0
+    # 45 days on, every horizon inside the expiry (and expiry itself) is graded
+    n = track.grade(loaded, SyntheticProvider(), today=today + dt.timedelta(days=45))
+    assert n > 0
+    for p in loaded:
+        assert p.grades and "error" not in p.grades
+        for g in p.grades.values():
+            assert {"spot", "otm", "tested", "pct_of_max", "hit_50"} <= set(g)
+            assert g["low_since"] is not None
+    track.save(loaded, path)
+    sc = track.scorecard(track.load(path))
+    assert sc["picks"] == len(picks) and sc["graded"] == len(picks)
+    assert sc["by_horizon"]["7"]["n"] >= 1
+    assert sc["by_horizon"]["7"]["otm_pct"] is not None
+    assert sc["by_sector"]
+
+
+def test_track_grade_math():
+    from scanner import track
+
+    p = track.Pick(picked_on="2026-09-01", ticker="X", strategy="short put",
+                   strike=90.0, expiry="2026-10-16", dte=45, spot=100.0,
+                   mid=2.0, iv=0.30, delta=-0.2)
+    up = track.grade_one(p, "7", spot_now=105.0, low_since=99.0, on=dt.date(2026, 9, 8))
+    assert up["otm"] and not up["tested"] and up["pct_of_max"] > 0
+    down = track.grade_one(p, "7", spot_now=85.0, low_since=84.0, on=dt.date(2026, 9, 8))
+    assert not down["otm"] and down["tested"] and down["pct_of_max"] < 0
+    at_exp = track.grade_one(p, "expiry", spot_now=95.0, low_since=91.0, on=dt.date(2026, 10, 16))
+    assert at_exp["pct_of_max"] == 100.0 and at_exp["hit_50"]       # expired worthless
+
+
+def test_picks_from_brief_parses_strike_zones():
+    from scanner import track
+
+    brief = {"candidates": [
+        {"ticker": "TJX", "spot": "133.27", "rsi": "21.1", "zone": "Sell 125P", "signals": "a · b"},
+        {"ticker": "ODFL", "spot": "186.72", "rsi": "26.9", "zone": "Sell 172-177P"},
+        {"ticker": "CMI", "spot": "551.15", "rsi": "26.1", "zone": "515P / 495P spread"},
+        {"ticker": "ZZZ", "spot": "10", "zone": "watch only"},                # no strike → skipped
+    ]}
+    picks = track.picks_from_brief(brief, today=dt.date(2026, 9, 2))
+    got = {p.ticker: p.strike for p in picks}
+    assert got == {"TJX": 125.0, "ODFL": 174.5, "CMI": 505.0}
+    assert picks[0].signals == ["a", "b"] and picks[0].source == "brief"
+    assert picks[0].expiry == "2026-10-17"
+
+
+def _rows():
+    return [
+        {"symbol": "SNDK  261016P01220000", "underlying": "SNDK", "type": "Equity Option",
+         "direction": "SHORT", "qty": 1, "mark": 30.0, "dte": 44, "expires": "10/16/2026"},
+        {"symbol": "SNDK  261016C01940000", "underlying": "SNDK", "type": "Equity Option",
+         "direction": "SHORT", "qty": 1, "mark": 40.0, "dte": 44, "expires": "10/16/2026"},   # same position
+        {"symbol": "MU    261016P00750000", "underlying": "MU", "type": "Equity Option",
+         "direction": "SHORT", "qty": 1, "mark": 12.0, "dte": 44, "expires": "10/16/2026"},
+        {"symbol": "MU    270115P00800000", "underlying": "MU", "type": "Equity Option",
+         "direction": "SHORT", "qty": 1, "mark": 60.0, "dte": 500, "expires": "01/15/2027"},  # LEAP: excluded
+        {"symbol": "KO", "underlying": "KO", "type": "Equity", "direction": "LONG", "qty": 200,
+         "mark": 70.0, "dte": None, "expires": None},                                         # stock: excluded
+        {"symbol": "./NGX6 LNEX6 261027P2.5", "underlying": "/NGX6", "type": "Future Option",
+         "direction": "SHORT", "qty": 2, "mark": 0.04, "dte": 55, "expires": "10/27/2026"},
+        {"symbol": "XLU   261016P00080000", "underlying": "XLU", "type": "Equity Option",
+         "direction": "SHORT", "qty": 1, "mark": 1.0, "dte": 44, "expires": "10/16/2026"},
+        {"symbol": "SO    261016P00085000", "underlying": "SO", "type": "Equity Option",
+         "direction": "SHORT", "qty": 1, "mark": 1.5, "dte": 44, "expires": "10/16/2026"},
+        {"symbol": "NEE   261016P00070000", "underlying": "NEE", "type": "Equity Option",
+         "direction": "SHORT", "qty": 1, "mark": 1.2, "dte": 44, "expires": "10/16/2026"},
+    ]
+
+
+def test_rulebook_counts_positions_the_traders_way():
+    from scanner import rules
+
+    tags = {s.ticker: s.tags for s in DEFAULT_UNIVERSE}
+    rows = _rows()
+    assert len(rules.position_groups(rows)) == 6      # SNDK strangle=1, MU(non-LEAP)=1, /NG, XLU, SO, NEE
+    assert rules.per_ticker(rows)["SNDK"] == 1 and rules.per_ticker(rows)["MU"] == 1
+    sectors = rules.per_sector(rows, tags)
+    # SNDK is not in the universe -> other; the /NGX6 leg resolves to its /NG root
+    assert sectors["utilities"] == 3 and sectors["semis"] == 1
+    assert sectors["other"] == 1 and sectors["futures-energy"] == 1
+    assert rules.futures_root("/NGX6") == "/NG" and rules.futures_root("/ESZ26") == "/ES"
+    assert rules.futures_root("AAPL") == "AAPL"
+    assert rules.futures_margin(rows) == pytest.approx(2 * 3_800)   # /NG estimate × 2 contracts
+
+    checks = {c.name: c for c in rules.check(rows, tags, balances={"net_liq": 450_000, "bp_used": 120_000, "futures_margin": 7_600})}
+    assert checks["Open positions"].value == 6 and checks["Open positions"].status == "ok"
+    assert checks["Per sector"].status == "breach" and "utilities" in checks["Per sector"].detail
+    assert checks["Buying power used"].value == pytest.approx(26.7, abs=0.1)
+    assert checks["Buying power used"].status == "ok"
+    assert checks["Futures sleeve"].value == 7_600 and checks["Futures sleeve"].status == "ok"
+    assert checks["β-delta (SPY)"].status == "n/a"
+    assert rules.worst_status(list(checks.values())) == "breach"
+
+    hot = rules.check(rows, tags, balances={"net_liq": 100_000, "bp_used": 45_000}, beta_delta=180.0)
+    by = {c.name: c.status for c in hot}
+    assert by["Buying power used"] == "breach" and by["β-delta (SPY)"] == "breach"
+    assert rules.parse_option("AAPL  261016P00295000") == {"root": "AAPL", "strike": 295.0, "is_put": True, "futures": False}
+    assert rules.parse_option("./NGX6 LNEX6 261027P2.5")["root"] == "/NG"
+
+
+def test_beta_weighted_delta_signs_and_scaling():
+    from scanner import rules
+
+    rows = [
+        {"symbol": "AAPL  261016P00295000", "underlying": "AAPL", "type": "Equity Option",
+         "direction": "SHORT", "qty": 2, "mark": 4.0, "dte": 44},
+        {"symbol": "KO", "underlying": "KO", "type": "Equity", "direction": "LONG", "qty": 100, "mark": 70.0, "dte": None},
+    ]
+    spot = {"AAPL": 310.0, "KO": 70.0}
+    beta = {"AAPL": 1.2, "KO": 0.5}
+    total, by = rules.beta_weighted_delta(rows, spot.get, beta.get, spy_spot=650.0)
+    assert total is not None and by["AAPL"] > 0 and by["KO"] > 0     # short put and long stock are both long delta
+    # KO: 100 sh × β0.5 × (70/650) = 5.38 SPY-deltas
+    assert by["KO"] == pytest.approx(100 * 0.5 * 70 / 650, abs=0.1)
+    assert total == pytest.approx(by["AAPL"] + by["KO"], abs=0.2)
+    none_total, _ = rules.beta_weighted_delta(rows, lambda u: None, beta.get, spy_spot=650.0)
+    assert none_total is None
+
+
+def test_candidate_fit_and_labels():
+    import numpy as np
+    import pandas as pd
+    from scanner import correlation as corr
+
+    rng = np.random.default_rng(0)
+    base = rng.normal(0, 1, 60)
+    closes = pd.DataFrame({
+        "A": 100 * np.exp(np.cumsum(base * 0.01)),
+        "B": 100 * np.exp(np.cumsum((base + rng.normal(0, 0.3, 60)) * 0.01)),   # tracks A
+        "C": 100 * np.exp(np.cumsum(rng.normal(0, 1, 60) * 0.01)),             # independent
+    })
+    fit = corr.candidate_fit(["B", "C", "ZZ"], ["A"], closes=closes)
+    assert fit["B"] > 0.7 and abs(fit["C"]) < 0.4 and fit["ZZ"] is None
+    assert corr.fit_label(fit["B"]).startswith("⚠️")
+    assert "adds diversification" in corr.fit_label(0.1)
+    assert corr.fit_label(None) == "no book data"
+    assert corr.candidate_fit(["B"], []) == {"B": None}

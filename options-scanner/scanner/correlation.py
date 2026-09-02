@@ -106,3 +106,46 @@ def rate_portfolio(avg: float) -> str:
     if avg >= 0.20:
         return "🟡 Moderate — reasonable spread, some clustering"
     return "🟢 Well diversified"
+
+
+def candidate_fit(candidates: list[str], held: list[str],
+                  closes=None) -> dict[str, float | None]:
+    """How each candidate would sit in the current book: its average
+    correlation to every held underlying (None when unmeasurable). Pass a
+    closes DataFrame to skip the fetch (tests, cached sessions)."""
+    held = [h for h in dict.fromkeys(held) if h]
+    cands = [c for c in dict.fromkeys(candidates) if c]
+    if not held or not cands:
+        return {c: None for c in cands}
+    if closes is None:
+        closes = fetch_closes(sorted(set(held) | set(cands)))
+    m = corr_matrix(closes)
+    out: dict[str, float | None] = {}
+    for c in cands:
+        if c not in m.columns:
+            out[c] = None
+            continue
+        vals = [float(m.loc[c, h]) for h in held
+                if h in m.columns and h != c and not _isnan(m.loc[c, h])]
+        out[c] = (sum(vals) / len(vals)) if vals else None
+    return out
+
+
+def fit_label(avg: float | None, hot: float = 0.60) -> str:
+    """One phrase for the Trade Plan card."""
+    if avg is None:
+        return "no book data"
+    if avg >= hot:
+        return f"⚠️ you already own this risk (avg ρ {avg:.2f})"
+    if avg >= 0.40:
+        return f"overlaps the book (avg ρ {avg:.2f})"
+    if avg >= 0.20:
+        return f"neutral fit (avg ρ {avg:.2f})"
+    return f"adds diversification (avg ρ {avg:.2f})"
+
+
+def _isnan(x) -> bool:
+    try:
+        return x != x
+    except Exception:
+        return True

@@ -155,11 +155,25 @@ else:
 
 NEED_SCAN = "Run the income scan first (sidebar → **Run scan**)."
 
-tab_plan, tab_csp, tab_ic, tab_bwb, tab_dip, tab_scalp, tab_pos, tab_corr = st.tabs(
+tab_plan, tab_csp, tab_ic, tab_bwb, tab_dip, tab_scalp, tab_score, tab_pos, tab_corr = st.tabs(
     ["📋 Trade Plan", "📉 Puts / Wheel", "🦅 Iron Condors", "🦋 Broken Wing Flies",
-     "🔻 Quality Dips", "⚡ Scalp", "💼 Positions", "🔗 Correlation"])
+     "🔻 Quality Dips", "⚡ Scalp", "📈 Scorecard", "💼 Positions", "🔗 Correlation"])
 
 _tags = {s.ticker: s.tags for s in universe} if have_result else {}
+_tags_all = {s.ticker: s.tags for s in DEFAULT_UNIVERSE}   # sector lookup for held names too
+import datetime as _dt  # noqa: E402
+
+
+def _grade_cell(g: dict | None) -> str:
+    """One glanceable cell for a track-record grade."""
+    if not g:
+        return ""
+    s = "✅" if g.get("otm") else "❌"
+    if g.get("pct_of_max") is not None:
+        s += f" {g['pct_of_max']:.0f}%"
+    if g.get("tested"):
+        s += " ⚠️"
+    return s
 from scanner.scan import score_bwb, score_condor, score_csp  # noqa: E402
 _cfg = ScanConfig()
 
@@ -170,11 +184,52 @@ with tab_plan:
         st.caption(f"The scan, boiled down to actions — generated {pulled}. "
                    "Confirm live premiums before entering. Not financial advice.")
 
+        held_unders: list[str] = []
+        rows_all: list[dict] = []
+
+        # -- Rulebook first: is the book inside the rules before adding to it? --
+        if TASTY_AVAILABLE:
+            try:
+                from scanner import rules as _rules
+                from scanner.tastytrade_provider import (TastytradeProvider as _TP,
+                                                         get_balances as _gb,
+                                                         get_positions as _gp)
+                _tp = _TP()
+                rows_all = _gp(_tp.session)
+                held_unders = sorted({r["underlying"] for r in rows_all if r.get("underlying")})
+                try:
+                    _bal = _gb(_tp.session)
+                except Exception:
+                    _bal = None
+                _bd = None
+                try:   # SPY-weighted delta from live marks; skipped if quotes fail
+                    _spy = _tp.underlying("SPY").spot
+                    _bd, _ = _rules.beta_weighted_delta(
+                        rows_all,
+                        lambda u: _tp.underlying(u).spot,
+                        lambda u: _tp.underlying(u).beta, _spy)
+                except Exception:
+                    pass
+                _checks = _rules.check(rows_all, _tags_all, _bal, _bd)
+                _worst = _rules.worst_status(_checks)
+                st.subheader({"breach": "📏 Rulebook — 🔴 outside the rules",
+                              "warn": "📏 Rulebook — 🟡 near a limit",
+                              "ok": "📏 Rulebook — 🟢 inside the rules"}.get(_worst, "📏 Rulebook"))
+                _cols = st.columns(len(_checks))
+                for _col, _ck in zip(_cols, _checks):
+                    _val = "—" if _ck.value is None else (f"{_ck.value:,.0f}" if abs(_ck.value) >= 100 else f"{_ck.value:g}")
+                    _col.metric(f"{_ck.icon} {_ck.name}", _val, help=_ck.detail)
+                _bad = [c for c in _checks if c.status in ("breach", "warn")]
+                if _bad:
+                    st.caption(" · ".join(f"**{c.name}**: {c.detail}" for c in _bad))
+            except Exception as exc:
+                st.caption(f"Rulebook check unavailable: {exc}")
+
         # -- What needs attention in the account first, grouped by urgency --
         if TASTY_AVAILABLE:
             try:
                 from scanner.tastytrade_provider import TastytradeProvider as _TP, get_positions as _gp
-                rows_all = _gp(_TP().session)
+                rows_all = rows_all or _gp(_TP().session)
                 closes = [r for r in rows_all if "CLOSE" in r["suggestion"]]
                 tested = [r for r in rows_all if "TESTED" in r["suggestion"]]
                 windows = [r for r in rows_all if "DTE" in r["suggestion"]
@@ -216,6 +271,27 @@ with tab_plan:
         if not picks:
             st.write("Nothing clears the quality bar right now (score ≥ 70 and "
                      "P(OTM) ≥ 65%). That's an answer too — don't force it.")
+
+        # -- Book-aware: how each pick sits against what you already hold --
+        fit: dict = {}
+        if picks and held_unders:
+            _fit_key = (tuple(c.ticker for _, c in picks), tuple(held_unders))
+            if st.session_state.get("fit_key") == _fit_key:
+                fit = st.session_state.get("fit", {})
+            else:
+                try:
+                    from scanner.correlation import candidate_fit
+                    fit = candidate_fit([c.ticker for _, c in picks], held_unders)
+                except Exception:
+                    fit = {}
+                st.session_state.fit_key, st.session_state.fit = _fit_key, fit
+
+        def _fit_txt(tk: str) -> str:
+            if tk not in fit:
+                return ""
+            from scanner.correlation import fit_label
+            return " · " + fit_label(fit[tk])
+
         for s, c in picks:
             why = list(sorted(c.entry_signals))
             info = result.infos.get(c.ticker)
@@ -239,7 +315,7 @@ with tab_plan:
                     vol_txt += f" · strike {c.em_cushion:.1f}× the expected move"
                 st.caption(f"Ties up \\${c.capital:,.0f} "
                            f"{'margin' if c.is_futures else 'cash'} · "
-                           f"{c.downside_protection_pct:.1f}% cushion{vol_txt} · "
+                           f"{c.downside_protection_pct:.1f}% cushion{vol_txt}{_fit_txt(c.ticker)} · "
                            f"why now: {why_txt} · score {s}")
 
         # -- One defined-risk idea --
@@ -255,6 +331,34 @@ with tab_plan:
                 m4.metric("Profit zone", f"{ic.breakeven_low:,.0f}–{ic.breakeven_high:,.0f}")
                 st.caption(f"Legs: {ic.put_long:g}/{ic.put_short:g} puts — "
                            f"{ic.call_short:g}/{ic.call_long:g} calls")
+
+        # -- Earnings inside 45 days across the candidates and the book --
+        import datetime as _dt
+        _today = _dt.date.today()
+        _earn = []
+        for _tk, _info in result.infos.items():
+            if _info.next_earnings and 0 <= (_info.next_earnings - _today).days <= 45:
+                _earn.append({"Ticker": _tk,
+                              "Earnings": _info.next_earnings.strftime("%m/%d/%Y"),
+                              "Days": (_info.next_earnings - _today).days,
+                              "In book": "✅" if _tk in held_unders else "",
+                              "Source": "broker" if _info.iv_source == "tastytrade" else "Yahoo"})
+        if _earn:
+            st.subheader("📅 Earnings inside 45 days")
+            st.caption("No short strike through a report. Anything marked ✅ is a "
+                       "position you already hold.")
+            st.dataframe(pd.DataFrame(sorted(_earn, key=lambda r: r["Days"])),
+                         hide_index=True, use_container_width=True)
+
+        # -- Track record: log today's picks so the Scorecard can grade them --
+        if picks:
+            from scanner import track as _track
+            if st.button("📝 Log today's picks to the track record", key="log_picks",
+                         help="Appends the picks above to data/track_record.jsonl. "
+                              "Grade them later on the Scorecard tab."):
+                _n = _track.record(_track.picks_from_scan(result, _tags))
+                st.success(f"Logged {_n} new pick(s). They get graded at 7, 14 and "
+                           "30 days and at expiry — see 📈 Scorecard.")
 
         st.caption("Exit plan for anything you open: 25% of max on day one, 30% on "
                    "day two, then 50% or the 21-DTE window — same rules the "
@@ -452,6 +556,84 @@ with tab_scalp:
                        "100 = at the high). Stretch σ — distance from the 20-bar mean "
                        "in standard deviations; ±2 is at the bands. Stop = 0.6×ATR "
                        "past the session extreme; target = the 20-bar mean.")
+
+with tab_score:
+    from scanner import track as _track
+    st.caption("The scanner grades its own picks. Every logged pick is checked at "
+               "7, 14 and 30 days and at expiry: still out of the money, was the "
+               "strike ever tested, and how much of the credit the 50% rule would "
+               "have captured. This is the number that tells you whether to trust it.")
+    _picks = _track.load()
+    _c1, _c2 = st.columns([1, 3])
+    if _c1.button("🎯 Grade due picks", key="grade_now", disabled=not _picks):
+        try:
+            if demo:
+                from scanner.data import SyntheticProvider as _SP
+                _prov = _SP()
+            elif use_tasty:
+                from scanner.tastytrade_provider import TastytradeProvider as _TP2
+                _prov = _TP2()
+            else:
+                from scanner.data import YFinanceProvider as _YF
+                _prov = _YF()
+            _n = _track.grade(_picks, _prov)
+            _track.save(_picks)
+            _c2.success(f"Graded {_n} horizon(s) across {len(_picks)} pick(s).")
+        except Exception as exc:
+            _c2.error(f"Grading failed: {exc}")
+    if not _picks:
+        st.info("No picks logged yet. Run a scan, then hit **Log today's picks** on "
+                "the Trade Plan tab — or let the morning brief do it automatically.")
+    else:
+        _sc = _track.scorecard(_picks)
+        _m1, _m2, _m3, _m4 = st.columns(4)
+        _m1.metric("Picks logged", _sc["picks"])
+        _m2.metric("Graded", _sc["graded"])
+        _h30 = _sc["by_horizon"].get("30") or {}
+        _hx = _sc["by_horizon"].get("expiry") or {}
+        _m3.metric("Still OTM at 30d", f"{_h30['otm_pct']:.0f}%" if _h30.get("otm_pct") is not None else "—")
+        _m4.metric("Expired worthless", f"{_hx['otm_pct']:.0f}%" if _hx.get("otm_pct") is not None else "—")
+
+        st.markdown("**By horizon**")
+        st.dataframe(pd.DataFrame([{
+            "Horizon": ("expiry" if h == "expiry" else f"{h} days"),
+            "Graded": v["n"],
+            "Still OTM %": None if v["otm_pct"] is None else round(v["otm_pct"]),
+            "Strike tested %": None if v["tested_pct"] is None else round(v["tested_pct"]),
+            "Hit 50% rule %": None if v["hit_50_pct"] is None else round(v["hit_50_pct"]),
+            "Avg % of max": None if v["avg_pct_of_max"] is None else round(v["avg_pct_of_max"]),
+        } for h, v in _sc["by_horizon"].items()]), hide_index=True, use_container_width=True)
+
+        _l, _r = st.columns(2)
+        with _l:
+            st.markdown("**By entry signal**")
+            st.dataframe(pd.DataFrame([{"Signal": k, "Graded": v["n"],
+                                        "Still OTM %": None if v["otm_pct"] is None else round(v["otm_pct"]),
+                                        "Tested %": None if v["tested_pct"] is None else round(v["tested_pct"])}
+                                       for k, v in _sc["by_signal"].items()]),
+                         hide_index=True, use_container_width=True)
+        with _r:
+            st.markdown("**By sector**")
+            st.dataframe(pd.DataFrame([{"Sector": k, "Graded": v["n"],
+                                        "Still OTM %": None if v["otm_pct"] is None else round(v["otm_pct"]),
+                                        "Tested %": None if v["tested_pct"] is None else round(v["tested_pct"])}
+                                       for k, v in _sc["by_sector"].items()]),
+                         hide_index=True, use_container_width=True)
+
+        st.markdown("**Every pick**")
+        st.dataframe(pd.DataFrame([{
+            "Picked": _dt.datetime.fromisoformat(p.picked_on).strftime("%m/%d/%Y"),
+            "Ticker": p.ticker, "Strike": p.strike,
+            "Expiry": _dt.datetime.fromisoformat(p.expiry).strftime("%m/%d/%Y"),
+            "Spot then": p.spot, "Credit $": round(p.premium) if p.mid else None,
+            "IVR": None if p.iv_rank is None else round(p.iv_rank),
+            "Signals": " + ".join(p.signals), "Score": p.score, "Source": p.source,
+            "7d": _grade_cell(p.grades.get("7")), "14d": _grade_cell(p.grades.get("14")),
+            "30d": _grade_cell(p.grades.get("30")), "Expiry ": _grade_cell(p.grades.get("expiry")),
+        } for p in reversed(_picks)]), hide_index=True, use_container_width=True)
+        st.caption("Cells read: ✅ still OTM / ❌ through the strike, then % of max "
+                   "credit captured at that point, and ⚠️ if the strike was tested "
+                   "at any time since the pick.")
 
 with tab_corr:
     st.caption("PowerX-style asset correlation for YOUR book: how much your "

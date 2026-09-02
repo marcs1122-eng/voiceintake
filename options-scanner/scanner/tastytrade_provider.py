@@ -221,6 +221,10 @@ class TastytradeProvider(DataProvider):
         self._info_cache[ticker] = info
         return info
 
+    def history_lows(self, ticker: str, since: dt.date) -> float | None:
+        # daily bars still come from Yahoo; the streamer only backfills days
+        return self._yahoo().history_lows(ticker, since)
+
     # Bars of history to backfill per timeframe (enough for a 50-bar SMA).
     _CANDLE_LOOKBACK = {"5m": dt.timedelta(days=3), "10m": dt.timedelta(days=5),
                         "1h": dt.timedelta(days=14), "4h": dt.timedelta(days=45)}
@@ -424,6 +428,28 @@ class TastytradeProvider(DataProvider):
 # ----------------------------------------------------------------------
 # Account positions (read-only)
 # ----------------------------------------------------------------------
+
+def get_balances(session) -> dict:
+    """Account-wide balances the rulebook needs, summed across accounts:
+    net_liq, bp_used (derivative buying power in use), bp_total,
+    futures_margin, maintenance."""
+    from tastytrade import Account
+    out = {"net_liq": 0.0, "bp_used": 0.0, "bp_total": 0.0,
+           "futures_margin": 0.0, "maintenance": 0.0, "accounts": 0}
+    for acct in _run(Account.get(session)):
+        try:
+            b = _run(acct.get_balances(session))
+        except Exception:
+            continue
+        g = lambda name: float(getattr(b, name, 0) or 0)  # noqa: E731
+        out["net_liq"] += g("net_liquidating_value")
+        out["bp_used"] += g("used_derivative_buying_power")
+        out["bp_total"] += g("derivative_buying_power")
+        out["futures_margin"] += g("futures_margin_requirement")
+        out["maintenance"] += g("maintenance_requirement")
+        out["accounts"] += 1
+    return out
+
 
 import re as _re
 
