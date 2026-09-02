@@ -1015,3 +1015,96 @@ def test_news_parse_score_and_split():
     assert "HD" in news.tag_tickers("Home Depot beats on earnings")
     assert "NVDA" in news.tag_tickers("NVDA slides 3%")
     assert "TJX" in news.ticker_feed("TJX") and "Treasury" in news.ticker_feed("/ZN")
+
+
+def _leg(sym, direction, qty, open_price, mark, under=None, dte=79, expires="11/20/2026",
+         days_held=5, acct="5WU"):
+    from scanner.tastytrade_provider import pretty_symbol
+    return {"account": acct, "symbol": sym, "display": pretty_symbol(sym),
+            "underlying": under or sym.split()[0].lstrip("."), "type": "Equity Option",
+            "direction": direction, "qty": qty, "open_price": open_price, "mark": mark,
+            "pl_open": (open_price - mark) * qty * 100 * (1 if direction == "SHORT" else -1),
+            "dte": dte, "expires": expires, "days_held": days_held}
+
+
+def test_positions_strangle_breakeven_and_calls():
+    from scanner import positions
+
+    rows = [
+        # Mac's TLT strangle: 5x 80P / 86C, credits 0.84 + 0.53
+        _leg("TLT   261120P00080000", "SHORT", 5, 0.84, 0.99),
+        _leg("TLT   261120C00086000", "SHORT", 5, 0.53, 0.40),
+        # a single short put, healthy and 55% captured after a week
+        _leg("KO    261016P00060000", "SHORT", 2, 1.00, 0.45, dte=44, expires="10/16/2026"),
+        # a put spread 30% captured on day 4 → roll forward
+        _leg("XLE   261016P00085000", "SHORT", 1, 1.50, 1.10, dte=44, expires="10/16/2026", days_held=4),
+        _leg("XLE   261016P00080000", "LONG", 1, 0.50, 0.40, dte=44, expires="10/16/2026", days_held=4),
+        # inside the window
+        _leg("SPY   260918P00600000", "SHORT", 1, 3.00, 2.60, dte=16, expires="09/18/2026"),
+        # stock row is ignored
+        {"account": "5WU", "symbol": "F", "underlying": "F", "type": "Equity", "direction": "LONG",
+         "qty": 100, "open_price": 10, "mark": 11, "pl_open": 100},
+    ]
+    structs = positions.group(rows)
+    kinds = {s.underlying: s.kind for s in structs}
+    assert kinds == {"TLT": "strangle", "KO": "short put", "XLE": "put spread", "SPY": "short put"}
+    tlt = next(s for s in structs if s.underlying == "TLT")
+    assert tlt.qty == 5 and tlt.credit == pytest.approx(1.37) and tlt.mark_total == pytest.approx(1.39)
+    assert tlt.breakeven_low == pytest.approx(78.63) and tlt.breakeven_high == pytest.approx(87.37)
+    assert "80P / 86C strangle ×5" in tlt.display
+
+    # TLT at 81.94: inside the tent → hold, NOT tested (the old per-leg logic said tested)
+    spots = {"TLT": 81.94, "KO": 63.0, "XLE": 90.0, "SPY": 640.0}
+    built = positions.build(rows, spot_of=spots.get)
+    by = {s.underlying: s for s in built}
+    assert by["TLT"].status == "hold" and "inside 80–86" in by["TLT"].suggestion
+    assert by["KO"].status == "close" and "55%" in by["KO"].suggestion
+    assert by["XLE"].status == "roll_forward" and "add time" in by["XLE"].suggestion
+    assert by["SPY"].status == "window"
+    # order: most urgent first
+    assert [s.status for s in built] == sorted((s.status for s in built), key=lambda x: positions.STATUS_ORDER[x])
+
+    # TLT at 79.5: through the put strike, inside breakeven → tested, roll the CALL
+    t = positions.suggest(positions.group(rows[:2])[0], spot=79.5)
+    assert t.status == "tested" and "untested CALL" in t.suggestion and positions.untested_side(t) == "call"
+    # TLT at 78: below the breakeven → breached
+    t = positions.suggest(positions.group(rows[:2])[0], spot=78.0)
+    assert t.status == "breached" and "78.63" in t.suggestion
+    # call side tested → roll the PUT
+    t = positions.suggest(positions.group(rows[:2])[0], spot=86.5)
+    assert t.status == "tested" and positions.untested_side(t) == "put"
+    # no spot at all: mark-based fallback, labelled as such
+    t = positions.suggest(positions.group(rows[:2])[0], spot=None)
+    assert t.status == "hold" and "no live spot" not in t.suggestion   # only 1% against → plain hold
+    t2 = positions.group([_leg("IONQ  261002P00044000", "SHORT", 2, 4.25, 7.26)])[0]
+    t2 = positions.suggest(t2, spot=None)
+    assert "no live spot" in t2.suggestion
+
+
+def test_untested_roll_and_gap_filter_and_presets():
+    from scanner import present, roll
+    from scanner.scan import run_scan
+
+    prov = SyntheticProvider()
+    info = prov.underlying("SPY")
+    exp = info.expiries[3]
+    chain = prov.chain("SPY", exp)
+    far_call = max(q.strike for q in chain.calls)
+    r = roll.untested_roll(prov, "SPY", exp, "call", current_strike=far_call, current_mark=0.10)
+    assert r is not None and r.side == "call" and r.to_strike < far_call and r.to_strike > chain.spot
+    assert 0.10 <= r.delta <= 0.45 and r.net_dollars == pytest.approx(r.net * chain.multiplier)
+    assert roll.untested_roll(prov, "SPY", exp, "call", current_strike=chain.spot, current_mark=1.0) is None
+
+    universe = filter_universe(DEFAULT_UNIVERSE, tickers={"SPY", "AAPL", "KO", "XLE", "MSFT"})
+    res = run_scan(prov, universe, ScanConfig(min_annualized_pct=0.0, max_gap_pct=-2.0))
+    assert all(res.infos[c.ticker].gap_pct <= -2.0 for c in res.csps)
+    assert any(i.gap_pct is not None for i in res.infos.values())
+    res_all = run_scan(prov, universe, ScanConfig(min_annualized_pct=0.0))
+    assert len(res_all.csps) >= len(res.csps)
+
+    assert present.preset("Gap down · today")["gap"] == -2.0
+    assert present.preset("Diversify · my book")["diversify"] is True
+    assert present.preset("Top picks · today")["top_n"] == 10
+    known = {s.ticker for s in DEFAULT_UNIVERSE}
+    names = present.diversify_universe([("XLE", -0.12), ("FXI", 0.08), ("ZN=F", 0.18)], known)
+    assert "XLE" in names and "/ZN" in names and all(t in known or t.startswith("/") for t in names)

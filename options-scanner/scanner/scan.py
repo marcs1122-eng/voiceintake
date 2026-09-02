@@ -24,6 +24,7 @@ class ScanConfig:
     min_premium: float = 0.10
     max_capital: float | None = None      # skip strikes needing more cash than this
     avoid_earnings: bool = True           # penalize (not drop) earnings-before-expiry
+    max_gap_pct: float | None = None      # keep only names that gapped DOWN at least this much (e.g. -2.0)
     # Spreads
     condor_short_delta: float = 0.16
     condor_width_pct: float = 0.02
@@ -150,6 +151,13 @@ def run_scan(provider: DataProvider, universe: list[Symbol],
     if cfg.max_capital is not None:
         result.csps = [c for c in result.csps if c.capital <= cfg.max_capital]
     result.csps = [c for c in result.csps if c.annualized_pct >= cfg.min_annualized_pct]
+    if cfg.max_gap_pct is not None:
+        def _gapped(t: str) -> bool:
+            g = result.infos.get(t).gap_pct if t in result.infos else None
+            return g is not None and g <= cfg.max_gap_pct
+        result.csps = [c for c in result.csps if _gapped(c.ticker)]
+        result.condors = [c for c in result.condors if _gapped(c.ticker)]
+        result.bwbs = [b for b in result.bwbs if _gapped(b.ticker)]
 
     result.csps.sort(key=lambda c: score_csp(c, tags.get(c.ticker, frozenset()), cfg), reverse=True)
     result.condors.sort(key=lambda c: score_condor(c, cfg), reverse=True)

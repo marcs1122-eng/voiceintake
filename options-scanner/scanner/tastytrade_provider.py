@@ -217,6 +217,13 @@ class TastytradeProvider(DataProvider):
                 info.day_high = float(hi)
             if lo:
                 info.day_low = float(lo)
+            try:   # today's gap: open vs yesterday's close
+                _o = md.open or md.day_open
+                _pc = md.prev_close or md.prev_day_close
+                if _o and _pc:
+                    info.gap_pct = (float(_o) / float(_pc) - 1.0) * 100.0
+            except Exception:
+                pass
         info.expiries = self._expiries(ticker)
         self._info_cache[ticker] = info
         return info
@@ -317,6 +324,46 @@ class TastytradeProvider(DataProvider):
             return md[0] if md else None
         except Exception:
             return None
+
+    _INDEX_QUOTE = {"SPXW": "SPX", "NDXP": "NDX", "RUTW": "RUT", "XSP": "XSP", "SPX": "SPX",
+                    "NDX": "NDX", "RUT": "RUT", "VIX": "VIX"}
+
+    def spots(self, symbols: list[str]) -> dict[str, float]:
+        """One batched quote call for many underlyings: equities, indices and
+        specific futures contracts ('/GCZ6') or roots ('/GC' → front month)."""
+        from tastytrade.market_data import get_market_data_by_type
+        eq, idx, fut = [], [], []
+        back: dict[str, str] = {}
+        for u in dict.fromkeys(symbols):
+            if not u:
+                continue
+            if u in self._INDEX_QUOTE:
+                q = self._INDEX_QUOTE[u]; idx.append(q); back[q] = u
+            elif u.startswith("/"):
+                q = u if len(u.lstrip("/")) > 3 else (self._front_future_symbol(u) or "")
+                if q:
+                    fut.append(q); back[q] = u
+            else:
+                eq.append(u); back[u] = u
+        out: dict[str, float] = {}
+        for kwarg, batch in (("equities", eq), ("indices", idx), ("futures", fut)):
+            for i in range(0, len(batch), 100):
+                try:
+                    for md in _run(get_market_data_by_type(self.session, **{kwarg: batch[i:i + 100]})):
+                        px = md.mark or md.last or md.mid
+                        if px:
+                            out[back.get(md.symbol, md.symbol)] = float(px)
+                except Exception:
+                    continue
+        return out
+
+    def beta(self, ticker: str) -> float | None:
+        """Beta from the bulk market-metrics cache (no candles, no Yahoo)."""
+        if ticker not in self._metrics:
+            self.prefetch([ticker])
+        m = self._metrics.get(ticker)
+        b = getattr(m, "beta", None) if m is not None else None
+        return float(b) if b is not None else None
 
     def _live_spot(self, ticker: str) -> float | None:
         md = self._live_quote(ticker)

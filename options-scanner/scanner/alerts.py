@@ -45,11 +45,9 @@ def build_alerts(result=None, tags: dict | None = None, positions: list[dict] = 
     for r in positions:
         s = str(r.get("suggestion", ""))
         disp = r.get("display") or r.get("symbol", "")
-        if "CLOSE" in s:
+        if "CLOSE" in s or "TESTED" in s or "BREACHED" in s:
             out.append(Alert("act", r.get("underlying", ""), f"{disp}: {s}"))
-        elif "TESTED" in s:
-            out.append(Alert("act", r.get("underlying", ""), f"{disp}: {s}"))
-        elif "DTE" in s:
+        elif "ROLL FORWARD" in s or "DTE" in s:
             out.append(Alert("watch", r.get("underlying", ""), f"{disp}: {s}"))
 
     # -- rulebook --

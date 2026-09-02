@@ -34,7 +34,49 @@ PRESETS: dict[str, dict] = {
         timeframe="1d", tags=["fut-liquid"], dte=(30, 60), delta=(0.15, 0.30),
         min_annual=12.0, min_oi=50,
         blurb="The liquid futures options books, 30-60 days, margin-secured."),
+    "Top picks · today": dict(
+        timeframe="1d", tags=[], dte=(21, 45), delta=(0.15, 0.30),
+        min_annual=15.0, min_oi=200, top_n=10,
+        blurb="Everything, 21-45 days, 15-30 delta — the ten best-scored names only."),
+    "Gap down · today": dict(
+        timeframe="1d", tags=[], dte=(21, 45), delta=(0.15, 0.30),
+        min_annual=12.0, min_oi=100, gap=-2.0,
+        blurb="Only names that opened 2%+ below yesterday's close. Premium is richest "
+              "right after the gap; confirm the gap is not earnings or a downgrade."),
+    "Diversify · my book": dict(
+        timeframe="1d", tags=[], dte=(21, 45), delta=(0.15, 0.30),
+        min_annual=10.0, min_oi=100, diversify=True,
+        blurb="Scans the sectors that move least with what you already hold — the "
+              "Correlation tab's diversifiers plus the stocks inside them."),
 }
+
+# The Correlation tab's diversifiers → the names to actually scan for entries.
+# Each entry: yahoo symbol of the diversifier → (label, tickers in that bucket).
+DIVERSIFY_BUCKETS: dict[str, tuple[str, list[str]]] = {
+    "GLD": ("gold", ["GLD", "/GC", "NEM", "GDX"]),
+    "TLT": ("long bonds", ["TLT", "/ZN", "/ZB"]),
+    "ZN=F": ("rates", ["/ZN", "TLT", "IEF"]),
+    "XLU": ("utilities", ["XLU", "SO", "DUK", "NEE", "D", "AEP"]),
+    "XLP": ("staples", ["XLP", "KO", "PEP", "PG", "WMT", "COST", "PM", "MO"]),
+    "XLV": ("healthcare", ["XLV", "JNJ", "MRK", "PFE", "LLY", "UNH", "ABBV", "AMGN"]),
+    "XLE": ("energy", ["XLE", "XOM", "CVX", "COP", "OXY", "SLB", "/CL"]),
+    "FXI": ("china", ["FXI", "BABA", "PDD", "JD", "BIDU"]),
+    "IWM": ("small caps", ["IWM", "/RTY"]),
+    "USO": ("oil", ["USO", "/CL", "XLE", "XOM"]),
+}
+
+
+def diversify_universe(ideas: list[tuple[str, float]], known: set[str],
+                       max_buckets: int = 4, max_names: int = 30) -> list[str]:
+    """ideas = [(yahoo symbol, avg corr to the book)] lowest first. Returns the
+    tickers to scan, restricted to names the scanner knows (plus futures roots)."""
+    out: list[str] = []
+    for ysym, _ in ideas[:max_buckets]:
+        _, names = DIVERSIFY_BUCKETS.get(ysym, (ysym, [ysym]))
+        for t in names:
+            if (t in known or t.startswith("/")) and t not in out:
+                out.append(t)
+    return out[:max_names]
 
 DEFAULTS = dict(timeframe="1d", tags=[], dte=(7, 45), delta=(0.10, 0.35),
                 min_annual=12.0, min_oi=100, blurb="")

@@ -94,3 +94,50 @@ def best_roll(rolls: list[RollOption]) -> RollOption | None:
     debit roll is only shown, never recommended."""
     credits = [r for r in rolls if r.is_credit]
     return credits[0] if credits else None
+
+
+@dataclass
+class SideRoll:
+    """Rolling the untested side of a strangle in toward a target delta."""
+    side: str             # "call" | "put"
+    from_strike: float
+    to_strike: float
+    delta: float
+    new_mid: float
+    net: float            # per share credit collected by the roll
+    multiplier: float
+
+    @property
+    def net_dollars(self) -> float:
+        return self.net * self.multiplier
+
+
+def untested_roll(provider: DataProvider, ticker: str, expiry: dt.date, side: str,
+                  current_strike: float, current_mark: float,
+                  target_delta: float = 0.25) -> SideRoll | None:
+    """Same expiry, roll the untested side in to the strike whose delta is
+    closest to target_delta (the original entry delta). Returns None when
+    the chain has nothing closer to the money than the current strike."""
+    chain = provider.chain(ticker, expiry)
+    is_put = side == "put"
+    quotes = [q for q in (chain.puts if is_put else chain.calls) if q.mid > 0 and q.iv > 0]
+    if is_put:
+        quotes = [q for q in quotes if q.strike > current_strike and q.strike < chain.spot]
+    else:
+        quotes = [q for q in quotes if q.strike < current_strike and q.strike > chain.spot]
+    if not quotes:
+        return None
+    t = max(chain.dte, 1) / 365.0
+    scored = []
+    for q in quotes:
+        try:
+            d = abs((bs.put_delta if is_put else bs.call_delta)(chain.spot, q.strike, q.iv, t))
+        except ValueError:
+            continue
+        scored.append((abs(d - target_delta), d, q))
+    if not scored:
+        return None
+    _, d, q = min(scored, key=lambda x: x[0])
+    return SideRoll(side=side, from_strike=current_strike, to_strike=q.strike, delta=d,
+                    new_mid=round(q.mid, 2), net=round(q.mid - current_mark, 2),
+                    multiplier=chain.multiplier)

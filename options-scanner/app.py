@@ -40,9 +40,38 @@ if _gate and not st.session_state.get("authed"):
         st.error("Wrong password.")
     st.stop()
 
-st.title("🎯 Options Income Scanner")
-st.caption("Cash-secured puts · wheel · iron condors · broken wing butterflies — "
-           "stocks **and** ETFs. Estimates at mid; not financial advice.")
+# --- Look & feel ------------------------------------------------------------
+st.markdown("""
+<style>
+.hero{background:linear-gradient(120deg,#0f172a 0%,#1e3a8a 60%,#2563eb 100%);color:#fff;
+      border-radius:16px;padding:18px 24px;margin:-10px 0 10px}
+.hero h1{margin:0;font-size:1.9rem;color:#fff;letter-spacing:.01em}
+.hero p{margin:4px 0 0;opacity:.85;font-size:.95rem}
+div[data-testid="stMetric"]{background:#f8fafc;border:1px solid #e5e7eb;border-radius:12px;padding:10px 14px}
+button[data-baseweb="tab"]{font-size:1rem;font-weight:600}
+.pcard{border:1px solid #e3e8ef;border-left:6px solid #94a3b8;border-radius:12px;padding:14px 18px;
+       margin:10px 0;background:#fff;box-shadow:0 1px 3px rgba(16,24,40,.06)}
+.pcard.hi{border-left-color:#16a34a;background:linear-gradient(90deg,#f0fdf4 0,#fff 35%)}
+.pcard.mid{border-left-color:#f59e0b;background:linear-gradient(90deg,#fffbeb 0,#fff 35%)}
+.pc-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.pc-tk{font-weight:800;font-size:1.25rem;letter-spacing:.02em;color:#0f172a}
+.pc-verdict{flex:1;font-size:1.02rem;color:#1f2937;min-width:240px}
+.pc-score{font-weight:700;background:#111827;color:#fff;border-radius:999px;padding:3px 12px;font-size:.9rem}
+.pc-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin:12px 0 8px}
+.pc-stats div{background:#f8fafc;border-radius:10px;padding:8px 10px}
+.pc-stats b{display:block;font-size:1.2rem;color:#0f172a}
+.pc-stats small{color:#64748b;font-size:.72rem;text-transform:uppercase;letter-spacing:.04em}
+.chip{display:inline-block;border-radius:999px;padding:2px 10px;margin:2px 4px 0 0;font-size:.8rem;
+      background:#f1f5f9;color:#475569;border:1px solid #e2e8f0}
+.chip.on{background:#dcfce7;color:#166534;border-color:#bbf7d0}
+.chip.warn{background:#fef3c7;color:#92400e;border-color:#fde68a}
+.chip.bad{background:#fee2e2;color:#991b1b;border-color:#fecaca}
+.pc-why{color:#475569;font-size:.85rem;margin-top:6px}
+.pos-line{padding:6px 10px;border-radius:8px;margin:3px 0;background:#f8fafc;border:1px solid #e5e7eb}
+</style>
+<div class="hero"><h1>🎯 Options Income Scanner</h1>
+<p>Cash-secured puts · wheel · iron condors · broken wing butterflies · futures · scalp radar — estimates at mid; not financial advice.</p></div>
+""", unsafe_allow_html=True)
 
 ALL_TAGS = [
     # style / quality
@@ -60,6 +89,18 @@ try:
     TASTY_AVAILABLE = _tasty_ready()
 except Exception:
     TASTY_AVAILABLE = False
+
+def _tasty():
+    """One tastytrade session per browser session (login is slow; never redo it per rerun)."""
+    if not TASTY_AVAILABLE:
+        return None
+    tp = st.session_state.get("tasty")
+    if tp is None:
+        from scanner.tastytrade_provider import TastytradeProvider
+        tp = TastytradeProvider(timeframe="1d")
+        st.session_state.tasty = tp
+    return tp
+
 
 with st.sidebar:
     st.header("Scan settings")
@@ -112,6 +153,32 @@ if go:
     if tags:
         universe = select_by_tags(universe, set(tags))
 
+    st.session_state.pop("diversify_note", None)
+    if _p.get("diversify"):
+        _held0: list[str] = []
+        _tp0 = _tasty() if not demo else None
+        if _tp0 is not None:
+            try:
+                from scanner.tastytrade_provider import get_positions as _gp0
+                _held0 = sorted({r["underlying"] for r in _gp0(_tp0.session) if r.get("underlying")})
+            except Exception:
+                pass
+        try:
+            from scanner import correlation as _corr0
+            with st.spinner("Finding what diversifies your book…"):
+                _ideas = (_corr0.diversification_ideas(_held0) if _held0
+                          else [(l, y, 0.0) for l, y in _corr0.DIVERSIFIERS])
+            _known = {sym.ticker for sym in DEFAULT_UNIVERSE}
+            _names = _present.diversify_universe([(y, v) for _, y, v in _ideas], _known)
+            universe = filter_universe(DEFAULT_UNIVERSE, tickers=set(_names))
+            universe += [Symbol(t, frozenset({"futures"})) for t in _names if t not in _known]
+            st.session_state.diversify_note = (
+                "Diversify scan — " + ", ".join(_names) + ". Lowest correlation to your book: "
+                + ", ".join(f"{l} {v:.2f}" for l, _, v in _ideas[:4])
+                + ("" if _held0 else " (no live positions found, so every diversifier was used)"))
+        except Exception as exc:
+            st.warning(f"Couldn't work out the diversifiers ({exc}); scanning the whole universe.")
+
     if demo:
         from scanner.data import SyntheticProvider
         provider = SyntheticProvider(timeframe=timeframe)
@@ -134,7 +201,8 @@ if go:
     cfg = ScanConfig(min_dte=dte[0], max_dte=dte[1], delta_min=delta[0],
                      delta_max=delta[1], min_annualized_pct=min_annual,
                      max_capital=max_capital or None,
-                     min_open_interest=int(min_oi), avoid_earnings=avoid_earnings)
+                     min_open_interest=int(min_oi), avoid_earnings=avoid_earnings,
+                     max_gap_pct=_p.get("gap"))
 
     bar = st.progress(0.0, text="Scanning…")
 
@@ -147,6 +215,9 @@ if go:
     from zoneinfo import ZoneInfo
     scan_time = datetime.now(ZoneInfo("America/New_York"))
     st.session_state.result = (result, rank_dips(result.infos, universe), universe, scan_time)
+    st.session_state.provider = provider
+    st.session_state.preset_used = preset_name
+    st.session_state.pop("plan_ctx", None)
 
 have_result = st.session_state.result is not None
 result = dips = universe = scan_time = None
@@ -168,15 +239,207 @@ else:
             "on its own).")
 
 NEED_SCAN = "Run the income scan first (sidebar → **Run scan**)."
+if st.session_state.get("diversify_note") and have_result:
+    st.caption("🧭 " + st.session_state.diversify_note)
+
+_tags = {s.ticker: s.tags for s in universe} if have_result else {}
+_tags_all = {s.ticker: s.tags for s in DEFAULT_UNIVERSE}   # sector lookup for held names too
+import datetime as _dt  # noqa: E402
+import html as _html  # noqa: E402
+from scanner.scan import score_bwb, score_condor, score_csp  # noqa: E402
+_cfg = ScanConfig()
+_TOP_N = int(_p.get("top_n") or 10)
+
+TAB_HELP = {
+    "plan": ("📋 Trade Plan", "Everything from the scan boiled down to actions: are you inside your "
+             "rules, what needs managing in the book, the top-ranked setups, earnings to avoid, "
+             "alerts, and the print button."),
+    "csp": ("📉 Puts / Wheel", "Cash- or margin-secured puts that passed your filters. Cards = plain "
+            "English on the best strike per name. Table = every column and every strike. Score blends "
+            "yield, probability, IV Rank, expected-move cushion and the technicals."),
+    "ic": ("🦅 Iron Condors", "Defined risk on both sides: a short put spread and a short call spread "
+           "placed around the expected move. Best when IV Rank is high and the chart is range-bound."),
+    "bwb": ("🦋 Broken Wing Flies", "A butterfly with one wing wider so it goes on for a small credit "
+            "or near zero cost: profits in a zone, with little or no risk on one side."),
+    "dip": ("🔻 Quality Dips", "Blue chips and big ETFs that are washed out: RSI, distance below the "
+            "50-day and the lower band. The wheel's shopping list."),
+    "scalp": ("⚡ Scalp", "Intraday radar on the most liquid futures: RSI extremes, 2-sigma band "
+              "breaks and the day's low/high on 5m to 1h bars, with a stop and a target sized in "
+              "dollars. Runs on its own, no scan needed."),
+    "news": ("📰 News", "Free feeds scored for what moves premium sellers: Fed, CPI, jobs, tariffs, "
+             "oil, and anything naming a ticker you hold or that today's scan picked."),
+    "score": ("📈 Scorecard", "Your track record. Every logged pick graded at 7, 14 and 30 days and at "
+              "expiry: did it stay out of the money, how much of the credit it captured, was it tested."),
+    "pos": ("💼 Positions", "Live positions grouped into the structures you actually sold (a strangle "
+            "is one trade, not two legs), with real breakevens on the total credit and the "
+            "management call: close, roll forward, roll the untested side, or hold."),
+    "corr": ("🔗 Correlation", "How much your positions move together over the last three months, "
+             "which pairs are the same trade, and what would actually diversify you."),
+}
+
+
+def _card_html(c, score: float, at_low: bool = False, extra: str = "") -> str:
+    """A colored trade card. Dollar signs go in as entities so Streamlit's
+    markdown never mistakes them for math."""
+    cls = "hi" if score >= 85 else ("mid" if score >= 75 else "")
+    chips = []
+    for ch in _present.chips(c):
+        kind = "on" if ch.startswith("🟢") else ("warn" if ch.startswith("🟡") else ("bad" if ch.startswith("🔴") else ""))
+        chips.append(f'<span class="chip {kind}">{_html.escape(ch[1:].strip())}</span>')
+    if at_low:
+        chips.append('<span class="chip on">at day low</span>')
+    verdict = _html.escape(_present.verdict(c)).replace("$", "&#36;")
+    why = _html.escape(_present.why(c, at_low)) + _html.escape(extra)
+    basis = "margin" if c.is_futures else "cash"
+    return (f'<div class="pcard {cls}"><div class="pc-head"><span class="pc-tk">{_html.escape(c.ticker)}</span>'
+            f'<span class="pc-verdict">{verdict}</span><span class="pc-score">{score:g}</span></div>'
+            f'<div class="pc-stats">'
+            f'<div><b>&#36;{c.premium:,.0f}</b><small>credit / contract</small></div>'
+            f'<div><b>{c.annualized_pct:.0f}%</b><small>annualized</small></div>'
+            f'<div><b>{c.prob_otm_pct:.0f}%</b><small>keeps the credit</small></div>'
+            f'<div><b>{c.breakeven:,.2f}</b><small>breakeven</small></div>'
+            f'<div><b>{c.downside_protection_pct:.1f}%</b><small>cushion</small></div>'
+            f'<div><b>&#36;{c.capital:,.0f}</b><small>{basis} tied up</small></div>'
+            f'</div><div class="pc-chips">{"".join(chips)}</div>'
+            f'<div class="pc-why">why now: {why} · {c.dte} DTE · exp {c.expiry:%m/%d/%Y}</div></div>')
+
+
+def _tab_head(key: str) -> None:
+    title, text = TAB_HELP[key]
+    st.markdown(f"##### {title}", help=text)
+
+
+def _plan_ctx() -> dict:
+    """Everything the Trade Plan, Positions, Alerts and Print need, computed
+    ONCE per scan and kept in the session — so switching a tab or a toggle
+    never re-hits the broker (that was the minute-long freeze)."""
+    key = pulled
+    ctx = st.session_state.get("plan_ctx")
+    if ctx and ctx.get("key") == key:
+        return ctx
+    ctx = {"key": key, "rows": [], "held": [], "bal": None, "spots": {}, "structs": [],
+           "checks": [], "bd": None, "picks": [], "fit": {}, "earn": [], "alerts": [],
+           "errors": [], "when": _dt.datetime.now()}
+    _tp = _tasty() if not demo else None
+    if _tp is not None:
+        try:
+            from scanner import positions as _positions
+            from scanner import rules as _rules
+            from scanner.tastytrade_provider import get_balances as _gb, get_positions as _gp
+            rows = _gp(_tp.session)
+            ctx["rows"] = rows
+            ctx["held"] = sorted({r["underlying"] for r in rows if r.get("underlying")})
+            try:
+                ctx["bal"] = _gb(_tp.session)
+            except Exception as exc:
+                ctx["errors"].append(f"balances: {exc}")
+            try:
+                ctx["spots"] = _tp.spots(ctx["held"] + ["SPY"])
+            except Exception as exc:
+                ctx["errors"].append(f"quotes: {exc}")
+            ctx["structs"] = _positions.build(rows, spot_of=ctx["spots"].get)
+            try:
+                spy = ctx["spots"].get("SPY")
+                if spy:
+                    ctx["bd"], _ = _rules.beta_weighted_delta(rows, ctx["spots"].get, _tp.beta, spy)
+            except Exception as exc:
+                ctx["errors"].append(f"beta-delta: {exc}")
+            ctx["checks"] = _rules.check(rows, _tags_all, ctx["bal"], ctx["bd"])
+        except Exception as exc:
+            ctx["errors"].append(f"positions: {exc}")
+    if have_result:
+        seen, picks = set(), []
+        for c in result.csps:
+            sc = score_csp(c, _tags.get(c.ticker, frozenset()), _cfg)
+            if c.ticker in seen or sc < 70 or c.prob_otm_pct < 65:
+                continue
+            seen.add(c.ticker)
+            picks.append((sc, c))
+            if len(picks) == (5 if _p.get("top_n") else 3):
+                break
+        ctx["picks"] = picks
+        if picks and ctx["held"]:
+            try:
+                from scanner.correlation import candidate_fit
+                ctx["fit"] = candidate_fit([c.ticker for _, c in picks], ctx["held"])
+            except Exception:
+                ctx["fit"] = {}
+        today = _dt.date.today()
+        for tk, info in result.infos.items():
+            if info.next_earnings and 0 <= (info.next_earnings - today).days <= 45:
+                ctx["earn"].append({"Ticker": tk,
+                                    "Earnings": info.next_earnings.strftime("%m/%d/%Y"),
+                                    "Days": (info.next_earnings - today).days,
+                                    "In book": "✅" if tk in ctx["held"] else "",
+                                    "Source": "broker" if info.iv_source == "tastytrade" else "Yahoo"})
+        ctx["earn"].sort(key=lambda r: r["Days"])
+        from scanner import alerts as _alerts
+        pos_rows = [{"underlying": x.underlying, "display": x.display, "suggestion": x.suggestion}
+                    for x in ctx["structs"]]
+        ctx["alerts"] = _alerts.build_alerts(result, _tags, pos_rows, ctx["checks"])
+    st.session_state.plan_ctx = ctx
+    return ctx
+
+
+def _print_block(key: str) -> None:
+    """The one-page brief: preview with a browser Print button (works on any
+    host), HTML download, and PDF + PNG when Chromium is available."""
+    if not have_result:
+        st.caption(NEED_SCAN)
+        return
+    try:
+        from tools import brief_pdf as _bp
+        ctx = _plan_ctx()
+        brief = _present.brief_from_result(result, _tags, ctx["picks"], ctx["checks"],
+                                           ctx["earn"], scan_time, ctx["held"])
+        page = _bp.build_html(brief, _bp.inline_fonts())
+    except Exception as exc:
+        st.caption(f"Printable brief unavailable: {exc}")
+        return
+    c1, c2, c3 = st.columns([2, 2, 3])
+    show = c1.toggle("🖨️ Preview + print", value=False, key=f"{key}_prev",
+                     help="Opens the one-page plan below with a Print button. Print → Save as PDF "
+                          "works in every browser, phone included.")
+    c2.download_button("⬇️ HTML file", page, "trade-plan.html", "text/html", key=f"{key}_html",
+                       help="Open it in any browser and print from there.")
+    can_pdf = False
+    try:
+        import playwright  # noqa: F401
+        can_pdf = _bp.find_chromium() is not None
+    except ImportError:
+        pass
+    if can_pdf:
+        if c3.button("Build PDF + PNG", key=f"{key}_build"):
+            import pathlib as _pl
+            import tempfile as _tf
+            out = _pl.Path(_tf.mkdtemp(prefix="plan-"))
+            pdf, png = _bp.render(brief, out)
+            st.session_state.plan_files = (pulled, pdf.read_bytes(), png.read_bytes())
+        pf = st.session_state.get("plan_files")
+        if pf and pf[0] == pulled:
+            d1, d2 = st.columns(2)
+            d1.download_button("⬇️ PDF", pf[1], "trade-plan.pdf", "application/pdf", key=f"{key}_pdf")
+            d2.download_button("⬇️ PNG", pf[2], "trade-plan.png", "image/png", key=f"{key}_png")
+    else:
+        c3.caption("Use Preview + print → your browser's Print → Save as PDF.")
+    if show:
+        import streamlit.components.v1 as components
+        btn = ('<style>@media print{.noprint{display:none!important}}</style>'
+               '<div class="noprint" style="text-align:right;margin:6px 0 10px">'
+               '<button onclick="window.print()" style="font-size:16px;padding:9px 20px;'
+               'border-radius:8px;background:#1e3a8a;color:#fff;border:0;cursor:pointer">'
+               '🖨️ Print / Save as PDF</button></div>')
+        components.html(page.replace("<body>", "<body>" + btn, 1), height=1150, scrolling=True)
+
+
+if have_result:
+    with st.expander("🖨️ Print today's plan", expanded=False):
+        _print_block("top")
 
 (tab_plan, tab_csp, tab_ic, tab_bwb, tab_dip, tab_scalp, tab_news, tab_score, tab_pos,
  tab_corr) = st.tabs(
     ["📋 Trade Plan", "📉 Puts / Wheel", "🦅 Iron Condors", "🦋 Broken Wing Flies",
      "🔻 Quality Dips", "⚡ Scalp", "📰 News", "📈 Scorecard", "💼 Positions", "🔗 Correlation"])
-
-_tags = {s.ticker: s.tags for s in universe} if have_result else {}
-_tags_all = {s.ticker: s.tags for s in DEFAULT_UNIVERSE}   # sector lookup for held names too
-import datetime as _dt  # noqa: E402
 
 
 def _grade_cell(g: dict | None) -> str:
@@ -189,119 +452,79 @@ def _grade_cell(g: dict | None) -> str:
     if g.get("tested"):
         s += " ⚠️"
     return s
-from scanner.scan import score_bwb, score_condor, score_csp  # noqa: E402
-_cfg = ScanConfig()
 
 with tab_plan:
+    _tab_head("plan")
     if not have_result:
         st.info(NEED_SCAN)
     else:
         st.caption(f"The scan, boiled down to actions — generated {pulled}. "
                    "Confirm live premiums before entering. Not financial advice.")
-
-        held_unders: list[str] = []
-        rows_all: list[dict] = []
-        _checks_out: list = []
+        _ctx = _plan_ctx()
+        from scanner import positions as _positions
+        from scanner import rules as _rules
+        for _e in _ctx["errors"]:
+            st.caption(f"⚠️ {_e}")
 
         # -- Rulebook first: is the book inside the rules before adding to it? --
-        if TASTY_AVAILABLE:
-            try:
-                from scanner import rules as _rules
-                from scanner.tastytrade_provider import (TastytradeProvider as _TP,
-                                                         get_balances as _gb,
-                                                         get_positions as _gp)
-                _tp = _TP()
-                rows_all = _gp(_tp.session)
-                held_unders = sorted({r["underlying"] for r in rows_all if r.get("underlying")})
-                try:
-                    _bal = _gb(_tp.session)
-                except Exception:
-                    _bal = None
-                _bd = None
-                try:   # SPY-weighted delta from live marks; skipped if quotes fail
-                    _spy = _tp.underlying("SPY").spot
-                    _bd, _ = _rules.beta_weighted_delta(
-                        rows_all,
-                        lambda u: _tp.underlying(u).spot,
-                        lambda u: _tp.underlying(u).beta, _spy)
-                except Exception:
-                    pass
-                _checks = _rules.check(rows_all, _tags_all, _bal, _bd)
-                _checks_out = _checks
-                _worst = _rules.worst_status(_checks)
-                st.subheader({"breach": "📏 Rulebook — 🔴 outside the rules",
-                              "warn": "📏 Rulebook — 🟡 near a limit",
-                              "ok": "📏 Rulebook — 🟢 inside the rules"}.get(_worst, "📏 Rulebook"))
-                _cols = st.columns(len(_checks))
-                for _col, _ck in zip(_cols, _checks):
-                    _val = "—" if _ck.value is None else (f"{_ck.value:,.0f}" if abs(_ck.value) >= 100 else f"{_ck.value:g}")
-                    _col.metric(f"{_ck.icon} {_ck.name}", _val, help=_ck.detail)
-                _bad = [c for c in _checks if c.status in ("breach", "warn")]
-                if _bad:
-                    st.caption(" · ".join(f"**{c.name}**: {c.detail}" for c in _bad))
-            except Exception as exc:
-                st.caption(f"Rulebook check unavailable: {exc}")
+        if _ctx["checks"]:
+            _checks = _ctx["checks"]
+            _worst = _rules.worst_status(_checks)
+            st.subheader({"breach": "📏 Rulebook — 🔴 outside the rules",
+                          "warn": "📏 Rulebook — 🟡 near a limit",
+                          "ok": "📏 Rulebook — 🟢 inside the rules"}.get(_worst, "📏 Rulebook"))
+            _cols = st.columns(len(_checks))
+            for _col, _ck in zip(_cols, _checks):
+                _val = "—" if _ck.value is None else (f"{_ck.value:,.0f}" if abs(_ck.value) >= 100 else f"{_ck.value:g}")
+                _col.metric(f"{_ck.icon} {_ck.name}", _val, help=_ck.detail)
+            _bad = [c for c in _checks if c.status in ("breach", "warn")]
+            if _bad:
+                st.caption(" · ".join(f"**{c.name}**: {c.detail}" for c in _bad))
 
-        # -- What needs attention in the account first, grouped by urgency --
-        if TASTY_AVAILABLE:
-            try:
-                from scanner.tastytrade_provider import TastytradeProvider as _TP, get_positions as _gp
-                rows_all = rows_all or _gp(_TP().session)
-                closes = [r for r in rows_all if "CLOSE" in r["suggestion"]]
-                tested = [r for r in rows_all if "TESTED" in r["suggestion"]]
-                windows = [r for r in rows_all if "DTE" in r["suggestion"]
-                           and "CLOSE" not in r["suggestion"] and "TESTED" not in r["suggestion"]]
+        # -- What needs attention in the book, by urgency, as STRUCTURES --
+        _structs = _ctx["structs"]
+        if _structs:
+            _by = {}
+            for _s in _structs:
+                _by.setdefault(_s.status, []).append(_s)
 
-                def _pos_line(r):
-                    return (f"**{r['display']}** ({r['direction']} {r['qty']:g}) — "
-                            f"open {r['open_price']:g} → mark {r['mark']:g}, "
-                            f"P/L {r['pl_open']:+,.0f}")
+            def _pos_line(x):
+                return (f"- **{x.display}** — {x.suggestion} · P/L {x.pl_open:+,.0f}")
 
-                if closes or tested or windows:
-                    st.subheader("🔔 Positions needing action")
-                    if closes:
-                        st.success("**Take profits** — hit your ladder:\n\n" +
-                                   "\n".join(f"- {_pos_line(r)} · {r['suggestion']}" for r in closes))
-                    if tested:
-                        st.error("**Being tested** — decide: defend, roll, or take the loss:\n\n" +
-                                 "\n".join(f"- {_pos_line(r)}" for r in tested))
-                    if windows:
-                        st.warning("**Inside the 21-DTE window** — roll or close even if healthy:\n\n" +
-                                   "\n".join(f"- {_pos_line(r)} · {r['suggestion']}" for r in windows))
-                else:
-                    st.subheader("🔔 Positions")
-                    st.write("Nothing needs action — everything is inside your rules.")
-            except Exception:
-                pass
+            _need = [k for k in ("breached", "tested", "close", "roll_forward", "window") if _by.get(k)]
+            if _need:
+                st.subheader("🔔 Positions needing action")
+                if _by.get("breached"):
+                    st.error("**Breakeven breached** — defend or take the loss:\n\n" +
+                             "\n".join(_pos_line(x) for x in _by["breached"]))
+                if _by.get("tested"):
+                    st.warning("**Being tested** — strike touched, still inside the breakeven. For a "
+                               "strangle, roll the *untested* side in toward its original delta:\n\n" +
+                               "\n".join(_pos_line(x) for x in _by["tested"]))
+                if _by.get("close"):
+                    st.success("**Take profits** — hit your ladder:\n\n" +
+                               "\n".join(_pos_line(x) for x in _by["close"]))
+                if _by.get("roll_forward"):
+                    st.info("**Roll forward** — 25%+ captured: bank it and add time:\n\n" +
+                            "\n".join(_pos_line(x) for x in _by["roll_forward"]))
+                if _by.get("window"):
+                    st.warning("**Inside the 21-DTE window** — roll or close even if healthy:\n\n" +
+                               "\n".join(_pos_line(x) for x in _by["window"]))
+            else:
+                st.subheader("🔔 Positions")
+                st.write("Nothing needs action — everything is inside your rules.")
+            _holds = _by.get("hold", [])
+            if _holds:
+                with st.expander(f"🟢 Holding fine ({len(_holds)})"):
+                    st.markdown("\n".join(_pos_line(x) for x in _holds))
 
-        # -- Best new trades: top-scored put per ticker, quality bar applied --
-        st.subheader("🎯 Recommended trades to put on")
-        seen, picks = set(), []
-        for c in result.csps:
-            s = score_csp(c, _tags.get(c.ticker, frozenset()), _cfg)
-            if c.ticker in seen or s < 70 or c.prob_otm_pct < 65:
-                continue
-            seen.add(c.ticker)
-            picks.append((s, c))
-            if len(picks) == 3:
-                break
+        # -- Best new setups: top-scored put per ticker, quality bar applied --
+        st.subheader("🎯 Top-ranked setups")
+        picks = _ctx["picks"]
         if not picks:
             st.write("Nothing clears the quality bar right now (score ≥ 70 and "
                      "P(OTM) ≥ 65%). That's an answer too — don't force it.")
-
-        # -- Book-aware: how each pick sits against what you already hold --
-        fit: dict = {}
-        if picks and held_unders:
-            _fit_key = (tuple(c.ticker for _, c in picks), tuple(held_unders))
-            if st.session_state.get("fit_key") == _fit_key:
-                fit = st.session_state.get("fit", {})
-            else:
-                try:
-                    from scanner.correlation import candidate_fit
-                    fit = candidate_fit([c.ticker for _, c in picks], held_unders)
-                except Exception:
-                    fit = {}
-                st.session_state.fit_key, st.session_state.fit = _fit_key, fit
+        fit = _ctx["fit"]
 
         def _fit_txt(tk: str) -> str:
             if tk not in fit:
@@ -309,31 +532,10 @@ with tab_plan:
             from scanner.correlation import fit_label
             return " · " + fit_label(fit[tk])
 
-        for s, c in picks:
-            why = list(sorted(c.entry_signals))
+        for s_, c in picks:
             info = result.infos.get(c.ticker)
-            if info is not None and info.at_day_low:
-                why.append("at the low of day")
-            why_txt = ", ".join(why) if why else "yield + liquidity"
-            with st.container(border=True):
-                head = f"SELL {c.ticker} {c.strike:g} put · exp {c.expiry:%m/%d/%Y} · {c.dte} DTE"
-                if c.earnings_before_expiry:
-                    head += " · ⚠️ earnings before expiry"
-                st.markdown(f"#### {head}")
-                m1, m2, m3, m4 = st.columns(4)
-                m1.metric("Credit / contract", f"${c.premium:,.0f}")
-                m2.metric("Annualized", f"{c.annualized_pct:.0f}%")
-                m3.metric("Prob. worthless", f"{c.prob_otm_pct:.0f}%")
-                m4.metric("Breakeven", f"{c.breakeven:,.2f}")
-                vol_txt = ""
-                if c.iv_rank is not None:
-                    vol_txt += f" · IVR {c.iv_rank:.0f}"
-                if c.em_cushion is not None:
-                    vol_txt += f" · strike {c.em_cushion:.1f}× the expected move"
-                st.caption(f"Ties up \\${c.capital:,.0f} "
-                           f"{'margin' if c.is_futures else 'cash'} · "
-                           f"{c.downside_protection_pct:.1f}% cushion{vol_txt}{_fit_txt(c.ticker)} · "
-                           f"why now: {why_txt} · score {s}")
+            st.markdown(_card_html(c, s_, bool(info and info.at_day_low), _fit_txt(c.ticker)),
+                        unsafe_allow_html=True)
 
         # -- One defined-risk idea --
         if result.condors:
@@ -350,22 +552,11 @@ with tab_plan:
                            f"{ic.call_short:g}/{ic.call_long:g} calls")
 
         # -- Earnings inside 45 days across the candidates and the book --
-        import datetime as _dt
-        _today = _dt.date.today()
-        _earn = []
-        for _tk, _info in result.infos.items():
-            if _info.next_earnings and 0 <= (_info.next_earnings - _today).days <= 45:
-                _earn.append({"Ticker": _tk,
-                              "Earnings": _info.next_earnings.strftime("%m/%d/%Y"),
-                              "Days": (_info.next_earnings - _today).days,
-                              "In book": "✅" if _tk in held_unders else "",
-                              "Source": "broker" if _info.iv_source == "tastytrade" else "Yahoo"})
-        if _earn:
+        if _ctx["earn"]:
             st.subheader("📅 Earnings inside 45 days")
             st.caption("No short strike through a report. Anything marked ✅ is a "
                        "position you already hold.")
-            st.dataframe(pd.DataFrame(sorted(_earn, key=lambda r: r["Days"])),
-                         hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame(_ctx["earn"]), hide_index=True, use_container_width=True)
 
         # -- Track record: log today's picks so the Scorecard can grade them --
         if picks:
@@ -380,7 +571,7 @@ with tab_plan:
         # -- Alerts: everything above, reduced to act / watch --
         st.subheader("🔔 Alerts")
         from scanner import alerts as _alerts
-        _al = _alerts.build_alerts(result, _tags, rows_all, _checks_out)
+        _al = _ctx["alerts"]
         if not _al:
             st.write("Nothing needs action.")
         for _a in _al:
@@ -394,48 +585,15 @@ with tab_plan:
             if st.button("📧 Email me these", key="email_alerts"):
                 st.info(_alerts.send_email(_al, subject=f"Scanner alerts {pulled}"))
 
-        # -- Print: the same one-page brief the morning routine emails --
         st.subheader("🖨️ Print today's plan")
-        try:
-            from tools import brief_pdf as _bp
-            _brief = _present.brief_from_result(
-                result, _tags, picks, _checks_out,
-                sorted(_earn, key=lambda r: r["Days"]), scan_time, held_unders)
-            _html = _bp.build_html(_brief, _bp.inline_fonts())
-            _c1, _c2 = st.columns(2)
-            _c1.download_button("Download HTML (open → print)", _html,
-                                "trade-plan.html", "text/html", key="plan_html")
-            _can_pdf = False
-            try:
-                import playwright  # noqa: F401
-                _can_pdf = _bp.find_chromium() is not None
-            except ImportError:
-                pass
-            if _can_pdf:
-                if _c2.button("Build PDF + PNG", key="plan_build"):
-                    import pathlib as _pl
-                    import tempfile as _tf
-                    _out = _pl.Path(_tf.mkdtemp(prefix="plan-"))
-                    _pdf, _png = _bp.render(_brief, _out)
-                    st.session_state.plan_files = (pulled, _pdf.read_bytes(), _png.read_bytes())
-                _pf = st.session_state.get("plan_files")
-                if _pf and _pf[0] == pulled:
-                    _d1, _d2 = st.columns(2)
-                    _d1.download_button("Download PDF", _pf[1], "trade-plan.pdf",
-                                        "application/pdf", key="plan_pdf")
-                    _d2.download_button("Download PNG", _pf[2], "trade-plan.png",
-                                        "image/png", key="plan_png")
-            else:
-                _c2.caption("PDF needs `playwright` + Chromium on this host; "
-                            "the HTML prints from any browser.")
-        except Exception as exc:
-            st.caption(f"Printable brief unavailable: {exc}")
+        _print_block("plan")
 
         st.caption("Exit plan for anything you open: 25% of max on day one, 30% on "
                    "day two, then 50% or the 21-DTE window — same rules the "
                    "Positions tab enforces.")
 
 with tab_csp:
+    _tab_head("csp")
     if not have_result:
         st.info(NEED_SCAN)
     elif not result.csps:
@@ -455,25 +613,11 @@ with tab_csp:
             return ""
 
         if _view == "Cards":
-            st.caption("Best strike per name and expiry, ranked by score. "
+            st.caption(f"Best strike per name and expiry, ranked by score — top {_TOP_N}. "
                        "Switch to **Table** for every column and every strike.")
-            for c in dedupe_csps(result.csps)[:10]:
+            for c in dedupe_csps(result.csps)[:_TOP_N]:
                 s_ = score_csp(c, _tags.get(c.ticker, frozenset()), _cfg)
-                _chips = _present.chips(c)
-                if _day_flag(c.ticker) == "AT LOW":
-                    _chips.append("🟢 at day low")
-                with st.container(border=True):
-                    st.markdown(f"**{_present.verdict(c)}**")
-                    st.caption("  ".join(_chips) + f"  ·  score {s_:g}")
-                    with st.expander("Details"):
-                        m1, m2, m3, m4 = st.columns(4)
-                        m1.metric("Annualized", f"{c.annualized_pct:.0f}%")
-                        m2.metric("Breakeven", f"{c.breakeven:,.2f}")
-                        m3.metric("Cushion", f"{c.downside_protection_pct:.1f}%")
-                        m4.metric("Delta / OI", f"{abs(c.delta):.2f} / {c.open_interest:,}")
-                        st.caption(f"Spot {c.spot:,.2f} · mid {c.mid:g} · IV {c.iv*100:.0f}% · "
-                                   f"{c.dte} DTE · signals: "
-                                   f"{', '.join(sorted(c.entry_signals)) or 'none'}")
+                st.markdown(_card_html(c, s_, _day_flag(c.ticker) == "AT LOW"), unsafe_allow_html=True)
         else:
             show_all = st.toggle(
                 "Show every strike in the delta band", value=False,
@@ -487,6 +631,7 @@ with tab_csp:
                 "Ticker": c.ticker, "Spot": c.spot,
                 "RSI": c.rsi_14,
                 "IVR": c.iv_rank,
+                "Gap %": result.infos[c.ticker].gap_pct if c.ticker in result.infos else None,
                 "Day Lo": result.infos[c.ticker].day_low if c.ticker in result.infos else None,
                 "Day Hi": result.infos[c.ticker].day_high if c.ticker in result.infos else None,
                 "@Day": _day_flag(c.ticker),
@@ -508,7 +653,7 @@ with tab_csp:
             _num = st.column_config.NumberColumn
             st.dataframe(df, use_container_width=True, hide_index=True, column_config={
                 "Score": _num(format="%d"), "Spot": _num(format="%.2f"),
-                "RSI": _num(format="%.0f"), "IVR": _num(format="%.0f"),
+                "RSI": _num(format="%.0f"), "IVR": _num(format="%.0f"), "Gap %": _num(format="%+.1f%%"),
                 "Day Lo": _num(format="%.2f"), "Day Hi": _num(format="%.2f"),
                 "Strike": _num(format="%g"), "Mid": _num(format="%.2f"),
                 "Premium/ct $": _num(format="$%d"), "Capital $": _num(format="$%d"),
@@ -521,6 +666,7 @@ with tab_csp:
             st.download_button("Download CSV", df.to_csv(index=False), "csps.csv")
 
 with tab_ic:
+    _tab_head("ic")
     if not have_result:
         st.info(NEED_SCAN)
     elif not result.condors:
@@ -540,6 +686,7 @@ with tab_ic:
         st.download_button("Download CSV", df.to_csv(index=False), "condors.csv")
 
 with tab_bwb:
+    _tab_head("bwb")
     if not have_result:
         st.info(NEED_SCAN)
     elif not result.bwbs:
@@ -560,6 +707,7 @@ with tab_bwb:
         st.download_button("Download CSV", df.to_csv(index=False), "bwbs.csv")
 
 with tab_dip:
+    _tab_head("dip")
     if not have_result:
         st.info(NEED_SCAN)
     else:
@@ -584,6 +732,7 @@ with tab_dip:
             st.download_button("Download CSV", df.to_csv(index=False), "dips.csv")
 
 with tab_scalp:
+    _tab_head("scalp")
     from scanner.scalp import SCALP_FUTURES, run_scalp_scan
     st.caption("Quick day-trade radar on the deepest futures — runs on its own, "
                "no option chains. LONG/SHORT SCALP = 2 of 3: RSI extreme, "
@@ -664,6 +813,7 @@ with tab_scalp:
                        "past the session extreme; target = the 20-bar mean.")
 
 with tab_score:
+    _tab_head("score")
     from scanner import track as _track
     st.caption("The scanner grades its own picks. Every logged pick is checked at "
                "7, 14 and 30 days and at expiry: still out of the money, was the "
@@ -742,6 +892,7 @@ with tab_score:
                    "at any time since the pick.")
 
 with tab_corr:
+    _tab_head("corr")
     st.caption("PowerX-style asset correlation for YOUR book: how much your "
                "positions move together, where you're doubled up, and what "
                "would actually diversify you. Based on ~3 months of daily closes.")
@@ -750,10 +901,7 @@ with tab_corr:
     if st.button("🔗 Analyze my positions", key="corr_go"):
         try:
             from scanner import correlation as corr_mod
-            unders = []
-            if TASTY_AVAILABLE:
-                from scanner.tastytrade_provider import TastytradeProvider as _TP, get_positions as _gp
-                unders = sorted({r["underlying"] for r in _gp(_TP().session) if r["underlying"]})
+            unders = list(_plan_ctx()["held"])
             unders += [t.strip().upper() for t in extra.split(",") if t.strip()]
             unders = sorted(set(unders))
             if len(unders) < 2:
@@ -819,89 +967,114 @@ with tab_corr:
                      use_container_width=True)
 
 with tab_pos:
-    st.caption("Live open positions from your tastytrade account (read-only). "
-               "For short options, '% of max profit' is how much of the credit "
-               "you've already captured — many sellers close at 50%.")
+    _tab_head("pos")
+    st.caption("Read-only, from your tastytrade account. Legs are grouped into the structure you "
+               "sold — a strangle is one line with the total credit and both breakevens. "
+               "'% captured' is how much of that credit you have already made.")
     if not TASTY_AVAILABLE:
         st.info("Connect tastytrade to see positions: put your API credentials in "
                 "`options-scanner/.env`, then run `python -m scanner.tastytrade_check`.")
     else:
-        try:
-            from scanner.tastytrade_provider import TastytradeProvider, get_positions
-            rows = get_positions(TastytradeProvider().session)
-            if not rows:
-                st.write("No open positions.")
-            else:
-                pos_df = pd.DataFrame(rows).rename(columns={
+        _pc1, _pc2 = st.columns([1, 5])
+        if _pc1.button("🔄 Refresh", key="pos_refresh", help="Re-pull positions, balances and quotes."):
+            st.session_state.pop("plan_ctx", None)
+        _ctx = _plan_ctx()
+        _pc2.caption(f"Pulled {_ctx['when']:%m/%d %I:%M %p}" + (" · " + " · ".join(_ctx["errors"]) if _ctx["errors"] else ""))
+        _structs = _ctx["structs"]
+        if not _structs and not _ctx["rows"]:
+            st.write("No open positions.")
+        else:
+            _sdf = pd.DataFrame([{
+                " ": x.icon, "Structure": x.display, "Status": x.status.replace("_", " "),
+                "Call": x.suggestion, "Qty": x.qty,
+                "Credit": round(x.credit, 2), "Mark": round(x.mark_total, 2),
+                "% captured": round(x.pct_of_max) if x.pct_of_max is not None else None,
+                "Spot": x.spot, "BE low": x.breakeven_low, "BE high": x.breakeven_high,
+                "DTE": x.dte, "P/L open": round(x.pl_open), "Held (days)": x.days_held,
+                "Account": x.account,
+            } for x in _structs])
+            st.dataframe(_sdf, use_container_width=True, hide_index=True, column_config={
+                "% captured": st.column_config.NumberColumn(format="%d%%"),
+                "P/L open": st.column_config.NumberColumn(format="$%d"),
+                "Spot": st.column_config.NumberColumn(format="%.2f"),
+            })
+            with st.expander("Every leg (raw)"):
+                pos_df = pd.DataFrame(_ctx["rows"]).rename(columns={
                     "account": "Account", "display": "Contract", "symbol": "Symbol", "type": "Type",
                     "direction": "Dir", "qty": "Qty", "open_price": "Open",
                     "mark": "Mark", "pl_open": "P/L open $",
                     "pct_of_max_profit": "% of max profit",
                     "dte": "DTE", "expires": "Expires",
-                    "days_held": "Held (days)", "suggestion": "Suggestion"})
-                cols = ["Suggestion", "Contract", "Dir", "Qty", "Open", "Mark",
-                        "P/L open $", "% of max profit", "Held (days)", "DTE",
-                        "Expires", "Type", "Account"]
-                pos_df = pos_df[[c for c in cols if c in pos_df.columns]]
-                st.dataframe(pos_df, use_container_width=True, hide_index=True)
+                    "days_held": "Held (days)"})
+                cols = ["Contract", "Dir", "Qty", "Open", "Mark", "P/L open $", "% of max profit",
+                        "Held (days)", "DTE", "Expires", "Type", "Account"]
+                st.dataframe(pos_df[[c for c in cols if c in pos_df.columns]],
+                             use_container_width=True, hide_index=True)
 
-                # -- Roll assistant: price the standard repairs for tested shorts --
-                _tested = [r for r in rows
-                           if "TESTED" in str(r.get("suggestion", ""))
-                           and "option" in str(r.get("type", "")).lower()
-                           and r.get("expires")]
-                if _tested:
-                    st.subheader("🔧 Roll assistant")
-                    st.caption("For each tested short: the same strike out in time, or one "
-                               "strike further out and out in time. Credits first — a debit "
-                               "roll is shown, never recommended.")
-                    from scanner import roll as _roll
-                    from scanner import rules as _rl
-                    if demo:
-                        from scanner.data import SyntheticProvider as _SP
-                        _rp = _SP()
-                    elif use_tasty:
-                        _rp = TastytradeProvider()
-                    else:
-                        from scanner.data import YFinanceProvider as _YP
-                        _rp = _YP()
-                    for r in _tested:
-                        _po = _rl.parse_option(r["symbol"])
-                        if not _po:
+            # -- Roll assistant: priced on demand, never on every rerun --
+            _needs = [x for x in _structs if x.status in ("tested", "breached")]
+            if _needs:
+                st.subheader("🔧 Roll assistant")
+                st.caption("Priced when you ask (chains are slow). Strangle tested on one side → the "
+                           "untested side rolled in to ≈0.25Δ. Otherwise the tested leg: same strike "
+                           "out in time, or one strike further out. Credits first; a debit roll is "
+                           "shown, never recommended.")
+                from scanner import positions as _positions
+                from scanner import roll as _roll
+                from scanner.rules import futures_root as _fr
+                _tp = _tasty()
+                for x in _needs:
+                    with st.expander(f"{x.icon} {x.display} — {x.status}"):
+                        if not st.button("Price rolls", key=f"roll_{x.account}_{x.underlying}_{x.expires}"):
+                            st.caption("Click to price.")
                             continue
-                        _exp = _dt.datetime.strptime(r["expires"], "%m/%d/%Y").date()
-                        with st.expander(f"{r['display']} — roll options"):
-                            try:
-                                _rolls = _roll.roll_candidates(
-                                    _rp, _po["root"], _po["strike"], _po["is_put"], _exp,
-                                    current_mark=float(r["mark"]),
-                                    original_credit=float(r["open_price"]))
-                            except Exception as exc:
-                                st.caption(f"Couldn't price rolls: {exc}")
-                                continue
+                        try:
+                            _exp = _dt.datetime.strptime(x.expires, "%m/%d/%Y").date()
+                            _root = _fr(x.underlying) if x.underlying.startswith("/") else x.underlying
+                            _side = _positions.untested_side(x)
+                            if _side:
+                                _leg = next(l for l in x.legs if l["_sign"] < 0 and l["is_put"] == (_side == "put"))
+                                _r = _roll.untested_roll(_tp, _root, _exp, _side, _leg["strike"],
+                                                         float(_leg["mark"]))
+                                if _r is None:
+                                    st.write(f"No {_side} strike closer to the money with quotes.")
+                                else:
+                                    _new_cr = x.credit + _r.net
+                                    st.success(f"Roll the {_side.upper()} {_r.from_strike:g} → **{_r.to_strike:g}** "
+                                               f"({_r.delta:.2f}Δ), same expiry, for **{_r.net_dollars * x.qty:,.0f}** "
+                                               f"more credit. New total credit {_new_cr:.2f}; breakevens "
+                                               f"{(x.short_put - _new_cr) if x.short_put else 0:g}–"
+                                               f"{(_r.to_strike + _new_cr) if _side == 'call' else (x.short_call + _new_cr):g}.")
+                            _tested_put = x.short_put is not None and x.spot is not None and x.spot <= x.short_put
+                            _k = x.short_put if _tested_put else x.short_call
+                            _leg = next(l for l in x.legs if l["_sign"] < 0 and l["is_put"] == _tested_put)
+                            _rolls = _roll.roll_candidates(_tp, _root, _k, _tested_put, _exp,
+                                                           current_mark=float(_leg["mark"]),
+                                                           original_credit=x.credit)
                             if not _rolls:
-                                st.write("No expiries 14–60 days further out with quotes.")
-                                continue
-                            _best = _roll.best_roll(_rolls)
-                            if _best:
-                                st.success(f"Default: **{_best.label}** → {_best.strike:g} "
-                                           f"exp {_best.expiry:%m/%d/%Y} ({_best.dte} DTE) for a "
-                                           f"**\\${_best.net_dollars:,.0f} credit**; new breakeven "
-                                           f"{_best.new_breakeven:,.2f}.")
+                                st.write("No expiries 14–60 days further out with quotes for the tested leg.")
                             else:
-                                st.warning("Every roll here is a debit — consider taking the "
-                                           "loss instead of paying to extend it.")
-                            st.dataframe(pd.DataFrame([{
-                                "Roll": x.label, "Expiry": x.expiry.strftime("%m/%d/%Y"),
-                                "DTE": x.dte, "Strike": x.strike, "New mid": x.new_mid,
-                                "Net $": round(x.net_dollars), "Credit?": "✅" if x.is_credit else "❌ debit",
-                                "Delta": round(abs(x.delta), 2), "New breakeven": x.new_breakeven,
-                                "OI": x.open_interest,
-                            } for x in _rolls]), hide_index=True, use_container_width=True)
-        except Exception as exc:
-            st.error(f"Couldn't load positions: {exc}")
+                                _best = _roll.best_roll(_rolls)
+                                if _best:
+                                    st.info(f"Tested leg, default roll: **{_best.label}** → {_best.strike:g} "
+                                            f"exp {_best.expiry:%m/%d/%Y} ({_best.dte} DTE) for a "
+                                            f"**{_best.net_dollars * x.qty:,.0f} credit**; breakeven "
+                                            f"{_best.new_breakeven:,.2f}.")
+                                else:
+                                    st.warning("Every roll of the tested leg is a debit — consider "
+                                               "taking the loss instead of paying to extend it.")
+                                st.dataframe(pd.DataFrame([{
+                                    "Roll": r.label, "Expiry": r.expiry.strftime("%m/%d/%Y"),
+                                    "DTE": r.dte, "Strike": r.strike, "New mid": r.new_mid,
+                                    "Net $": round(r.net_dollars * x.qty), "Credit?": "✅" if r.is_credit else "❌ debit",
+                                    "Delta": round(abs(r.delta), 2), "New breakeven": r.new_breakeven,
+                                    "OI": r.open_interest,
+                                } for r in _rolls]), hide_index=True, use_container_width=True)
+                        except Exception as exc:
+                            st.caption(f"Couldn't price rolls: {exc}")
 
 with tab_news:
+    _tab_head("news")
     from scanner import news as _news
     from scanner.rules import futures_root as _fr
     st.caption("Free public feeds — CNBC, MarketWatch, Yahoo Finance, the Federal Reserve — "
@@ -914,19 +1087,7 @@ with tab_news:
         return _news.fetch_all({k: _news.FEEDS[k] for k in feed_names}, list(watch))
 
     # names to watch: the book (cached 10 min) + today's put candidates + anything typed
-    _watch: list[str] = []
-    if TASTY_AVAILABLE:
-        try:
-            _hc = st.session_state.get("held_cache")
-            if not _hc or (_dt.datetime.now() - _hc[0]).total_seconds() > 600:
-                from scanner.tastytrade_provider import TastytradeProvider as _TPn
-                from scanner.tastytrade_provider import get_positions as _gpn
-                _hc = (_dt.datetime.now(),
-                       sorted({r["underlying"] for r in _gpn(_TPn().session) if r.get("underlying")}))
-                st.session_state.held_cache = _hc
-            _watch += _hc[1]
-        except Exception:
-            pass
+    _watch: list[str] = list(_plan_ctx()["held"])
     if have_result:
         for c in result.csps:
             if c.ticker not in _watch:

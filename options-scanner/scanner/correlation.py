@@ -149,3 +149,21 @@ def _isnan(x) -> bool:
         return x != x
     except Exception:
         return True
+
+
+def diversification_ideas(held: list[str]) -> list[tuple[str, str, float]]:
+    """[(label, yahoo symbol, avg corr to the book)] lowest first, using the
+    same closes the Correlation tab uses. Held names already in the
+    diversifier list are skipped."""
+    div_syms = [y for _, y in DIVERSIFIERS if y not in held]
+    closes = fetch_closes(list(held) + div_syms)
+    m = corr_matrix(closes)
+    book = [h for h in held if h in m.columns]
+    ideas = []
+    for label, ysym in DIVERSIFIERS:
+        if ysym in m.columns and ysym not in book:
+            vals = [m.loc[ysym, h] for h in book if not _isnan(m.loc[ysym, h])]
+            if vals:
+                ideas.append((label, ysym, float(sum(vals) / len(vals))))
+    ideas.sort(key=lambda t: t[2])
+    return ideas

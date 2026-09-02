@@ -71,6 +71,7 @@ class UnderlyingInfo:
     boll_upper: float = 0.0
     day_high: float = 0.0          # today's session high
     day_low: float = 0.0           # today's session low
+    gap_pct: float | None = None   # today's open vs yesterday's close, in %
 
     # --- volatility context (tastytrade market metrics when live; the Yahoo
     #     path fills iv_rank with a realized-vol rank as a labelled proxy) ---
@@ -221,6 +222,13 @@ class YFinanceProvider(DataProvider):
         last_bar = hist.iloc[-1]
         day_high = float(last_bar.get("High", 0) or 0)
         day_low = float(last_bar.get("Low", 0) or 0)
+        gap_pct = None
+        try:
+            _open = float(last_bar.get("Open", 0) or 0)
+            if _open and len(close) > 1 and float(close.iloc[-2]):
+                gap_pct = (_open / float(close.iloc[-2]) - 1.0) * 100.0
+        except Exception:
+            pass
 
         # RSI / 50-SMA / Bollinger are computed on the scan timeframe: daily
         # bars by default, intraday candles (5m/10m/1h/4h) for scalp mode.
@@ -259,7 +267,7 @@ class YFinanceProvider(DataProvider):
                               next_earnings, expiries,
                               sma_50=sma_50, boll_lower=boll_lower,
                               boll_upper=boll_upper,
-                              day_high=day_high, day_low=day_low,
+                              day_high=day_high, day_low=day_low, gap_pct=gap_pct,
                               iv_rank=hv_rank, hv_30=hv30,
                               dividend_yield=div_yield,
                               iv_source="hv-proxy" if hv_rank is not None else "")
@@ -394,6 +402,7 @@ class SyntheticProvider(DataProvider):
             boll_upper=round(spot * rng.uniform(1.03, 1.10), 2),
             day_high=round(spot * rng.uniform(1.001, 1.03), 2),
             day_low=round(spot * rng.uniform(0.97, 0.999), 2),
+            gap_pct=round(rng.uniform(-4.0, 2.0), 2),
             iv_rank=round(rng.uniform(5, 95), 1),
             iv_percentile=round(rng.uniform(5, 95), 1),
             iv_index=iv, hv_30=round(iv * rng.uniform(0.6, 1.0), 3),
