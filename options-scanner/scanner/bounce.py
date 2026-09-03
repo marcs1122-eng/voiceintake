@@ -33,6 +33,9 @@ from .data import DataProvider, UnderlyingInfo
 BOUNCE_ETFS = ["SPY", "QQQ", "IWM", "GLD", "TLT", "XLE", "XLV", "XLI", "XLF", "XLK",
                "XLY", "XLC", "XLU", "XBI", "KRE", "XOP", "GDX", "SOXL"]
 BOUNCE_FUTURES = ["/GC", "/MGC", "/CL", "/NG", "/6E", "/ZN", "/ZB", "/ZS"]
+BOUNCE_LEVERAGED = ["TQQQ", "SOXL", "SPXL", "UPRO", "TNA", "LABU", "NUGT", "JNUG", "UCO",
+                    "BOIL", "TMF", "FAS", "YINN", "ERX", "TSLL", "NVDL", "MSTU", "CONL",
+                    "AMDL", "AMZU", "GGLL", "MSFU", "METU", "BITX"]
 BANNED = {"CRDO", "SLV", "AAL", "NFLX"}
 SEMIS = {"MU", "WDC", "SNDK", "AMD", "AVGO", "NVDA", "INTC", "ARM", "SMCI"}
 
@@ -177,6 +180,8 @@ def evaluate(info: UnderlyingInfo, bars: list[tuple[float, float]] | None = None
         hit.flags.append("SEMIS · scalp only")
     if kind != "stock":
         hit.flags.append(kind.upper())
+    if tk in BOUNCE_LEVERAGED:
+        hit.flags.append("LEVERAGED · day trade only")
 
     if not hit.misses:
         hit.status = "hit"
@@ -234,7 +239,8 @@ def run_bounce(provider: DataProvider, tickers: list[str], cfg: BounceConfig | N
     def one(tk: str):
         info = provider.underlying(tk)
         bars = provider.daily_bars(tk, 260)
-        kind = kinds.get(tk) or ("futures" if tk.startswith("/") else ("etf" if tk in BOUNCE_ETFS else "stock"))
+        kind = kinds.get(tk) or ("futures" if tk.startswith("/") else
+                                 ("etf" if tk in BOUNCE_ETFS or tk in BOUNCE_LEVERAGED else "stock"))
         return evaluate(info, bars, cfg, today, kind=kind), info
 
     with ThreadPoolExecutor(max_workers=cfg.max_workers) as ex:

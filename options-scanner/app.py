@@ -75,7 +75,7 @@ button[data-baseweb="tab"]{font-size:1rem;font-weight:600}
 
 ALL_TAGS = [
     # style / quality
-    "etf", "blue-chip", "dividend", "growth", "high-iv",
+    "etf", "blue-chip", "dividend", "growth", "high-iv", "leveraged",
     # equity sectors (equities/ETFs only — futures never match these)
     "tech", "semis", "financials", "healthcare", "consumer",
     "industrials", "energy", "materials", "utilities", "reits", "china",
@@ -149,7 +149,8 @@ with st.sidebar:
                  "setups (oversold bounces at the day's low, etc.)")
         tags = st.multiselect("Universe tags (empty = everything)", ALL_TAGS,
                               default=list(_p["tags"]), key=f"tags_{_k}",
-                              help="Sector/style tags scan equities & ETFs only. "
+                              help="Sector/style tags scan equities & ETFs only. 'leveraged' = the 2-3x "
+                                   "and inverse ETFs (TQQQ, SOXL, SPXL …), only when asked for. "
                                    "Pick a futures tag (futures, fut-energy, …) to scan futures.")
         dte = st.slider("Days to expiration", 0, 90, tuple(_p["dte"]), key=f"dte_{_k}")
         delta = st.slider("Put delta range", 0.05, 0.50, tuple(_p["delta"]), step=0.01,
@@ -620,6 +621,10 @@ with tab_bounce:
         _b_dte = _b7.slider("DTE", 14, 60, (30, 45), key="b_dte")
         _b_delta = _b8.slider("Put delta", 0.10, 0.40, (0.20, 0.25), step=0.01, key="b_delta")
         _b_near = st.toggle("Show near-misses (RSI passes, band within 6%) with the reason", value=True, key="b_near")
+        _b_lev = st.toggle("Include leveraged ETFs (TQQQ SOXL SPXL TNA LABU NUGT UCO BOIL TMF …)",
+                           value=False, key="b_lev",
+                           help="2-3x products decay, so the 200-day rule is loose on them; they are "
+                                "flagged LEVERAGED and belong to day trades only.")
     if st.button("🏀 Run BOUNCE scan", type="primary", key="b_go"):
         _bcfg = _bounce.BounceConfig(rsi_max=_b_rsi, band_tol_pct=_b_band, day_drop_pct=_b_day,
                                      week_drop_pct=_b_week, sma200_tol_pct=_b_sma,
@@ -628,7 +633,7 @@ with tab_bounce:
         _prov = st.session_state.get("provider") or _make_provider("1d")
         st.session_state.provider = _prov
         _tks = [x.ticker for x in DEFAULT_UNIVERSE if "futures" not in x.tags and x.ticker not in _bounce.BANNED]
-        for x in _bounce.BOUNCE_ETFS + _bounce.BOUNCE_FUTURES:
+        for x in _bounce.BOUNCE_ETFS + _bounce.BOUNCE_FUTURES + (_bounce.BOUNCE_LEVERAGED if _b_lev else []):
             if x not in _tks:
                 _tks.append(x)
         _bar = st.progress(0.0, text="Bounce scan…")

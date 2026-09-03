@@ -34,6 +34,11 @@ PRESETS: dict[str, dict] = {
         timeframe="1d", tags=["fut-liquid"], dte=(30, 60), delta=(0.15, 0.30),
         min_annual=12.0, min_oi=50,
         blurb="The liquid futures options books, 30-60 days, margin-secured."),
+    "Leveraged · 2-3x": dict(
+        timeframe="1d", tags=["leveraged"], dte=(7, 30), delta=(0.15, 0.30),
+        min_annual=30.0, min_oi=500,
+        blurb="TQQQ, SOXL, SPXL, TNA, LABU, NUGT, UCO, BOIL, TMF and the 2x single-stock "
+              "funds. Fat premium, real decay — 1-4 week trades, never the wheel."),
     "Top picks · today": dict(
         timeframe="1d", tags=[], dte=(21, 45), delta=(0.15, 0.30),
         min_annual=15.0, min_oi=200, top_n=10,

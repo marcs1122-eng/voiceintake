@@ -1146,7 +1146,8 @@ def test_bounce_evaluate_and_scan():
     assert bounce.evaluate(info("CRDO", 165, 31, 176, 0.2), bars(165), today=today) is None
     assert bounce.evaluate(info("F", 10, 25, 10.5, -3), bars(10), today=today) is None
     # knife + semis flags
-    h5 = bounce.evaluate(info("MU", 100, 28, 101, -3), bars(100, month_drop=-0.30), today=today)
+    knife = [(142.0, 3e6)] * 239 + [(100.0, 3e6)] * 21          # 1-month: 142 → 100
+    h5 = bounce.evaluate(info("MU", 100, 28, 101, -3), knife, today=today)
     assert any(f.startswith("KNIFE") for f in h5.flags) and "SEMIS · scalp only" in h5.flags
     # ranking: hits before near-misses, lowest RSI first
     ranked = sorted([h4, h, h5], key=lambda x: x.rank_key)
