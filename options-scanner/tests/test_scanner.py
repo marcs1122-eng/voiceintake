@@ -1165,3 +1165,13 @@ def test_bounce_evaluate_and_scan():
         if h.status == "hit" and h.strike:
             assert 0.20 <= h.delta <= 0.25 and 30 <= h.dte <= 45 and h.credit > 0
     assert len(prov.daily_bars("SPY", 260)) == 260 and prov.daily_bars("SPY", 260)[-1][0] == prov.underlying("SPY").spot
+
+
+def test_leveraged_only_when_asked():
+    from scanner.universe import select_by_tags
+    etf = {s.ticker for s in select_by_tags(DEFAULT_UNIVERSE, {"etf"})}
+    assert "SPY" in etf and "TQQQ" not in etf and "SOXL" not in etf
+    lev = {s.ticker for s in select_by_tags(DEFAULT_UNIVERSE, {"leveraged"})}
+    assert {"TQQQ", "SOXL", "SPXL", "TNA", "NVDL"} <= lev and "SPY" not in lev
+    both = {s.ticker for s in select_by_tags(DEFAULT_UNIVERSE, {"etf", "leveraged"})}
+    assert "SPY" in both and "TQQQ" in both

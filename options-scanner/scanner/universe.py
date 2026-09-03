@@ -229,6 +229,8 @@ def select_by_tags(universe: list[Symbol], tags: set[str]) -> list[Symbol]:
     out = filter_universe(universe, include_tags=set(tags))
     if not (set(tags) & FUTURES_TAGS):
         out = [s for s in out if "futures" not in s.tags]
+    if "leveraged" not in set(tags):          # 2-3x funds only when asked for by name
+        out = [s for s in out if "leveraged" not in s.tags]
     return out
 
 
