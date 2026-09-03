@@ -56,12 +56,20 @@ plotshape(bounce, style=shape.triangleup, location=location.belowbar, color=colo
 alertcondition(bounce, title="BOUNCE setup", message="{{ticker}} BOUNCE: RSI<32 and close under lower BB")
 // Looser variant (either condition, then confirm by hand):
 // alertcondition(rsiCross or bandCross, title="BOUNCE watch", message="{{ticker}} RSI or band cross")
+// FADE side (call credit spreads): RSI(14) crossing UP 70 and close crossing UP the upper band
+upper = basis + 2.0 * ta.stdev(close, 20)
+fade  = ta.crossover(rsiV, 70) and ta.crossover(close, upper)
+plotshape(fade, style=shape.triangledown, location=location.abovebar, color=color.red, size=size.small)
+alertcondition(fade, title="FADE setup", message="{{ticker}} FADE: RSI>70 and close over upper BB")
 """
 
 
 @dataclass
 class BounceConfig:
+    direction: str = "bounce"        # bounce (RSI low, sell puts) | fade (RSI high, call credit spreads) | both
     rsi_max: float = 32.0
+    rsi_min_fade: float = 70.0       # fade side: RSI at or above this
+    spread_width_pct: float = 2.5    # fade side: long call this far above the short (min one strike)
     band_tol_pct: float = 1.0        # within this % ABOVE the lower band still counts
     day_drop_pct: float = -2.0       # today's move at or below this ...
     week_drop_pct: float = -8.0      # ... or the 5-session move at or below this
@@ -73,7 +81,7 @@ class BounceConfig:
     min_dte: int = 30
     max_dte: int = 45
     min_price: float = 15.0
-    min_avg_volume: float = 2_000_000.0
+    min_avg_volume: float = 1_000_000.0
     near_band_pct: float = 6.0       # near-miss tier: band within this %
     max_workers: int = 8
 
@@ -92,8 +100,10 @@ class BounceHit:
     earnings: dt.date | None
     earnings_source: str = ""
     kind: str = "stock"               # stock | etf | futures
+    side: str = "bounce"              # bounce (put sale) | fade (call credit spread)
     status: str = "hit"               # hit | near
     strike: float | None = None
+    long_strike: float | None = None  # fade: the protective long call
     delta: float | None = None
     credit: float | None = None       # per contract, dollars
     expiry: dt.date | None = None
@@ -103,7 +113,17 @@ class BounceHit:
 
     @property
     def rank_key(self) -> tuple:
+        if self.side == "fade":       # most overbought first, furthest above the band, biggest run
+            return (0 if self.status == "hit" else 1, -self.rsi, -self.vs_bb_pct, -(self.pct_5d or 0.0))
         return (0 if self.status == "hit" else 1, self.rsi, self.vs_bb_pct, self.pct_5d or 0.0)
+
+    @property
+    def trade(self) -> str:
+        if self.strike is None:
+            return ""
+        if self.side == "fade":
+            return f"{self.strike:g}/{self.long_strike:g} call credit spread" if self.long_strike else f"{self.strike:g} call"
+        return f"{self.strike:g} put"
 
     @property
     def earnings_txt(self) -> str:
@@ -151,20 +171,34 @@ def evaluate(info: UnderlyingInfo, bars: list[tuple[float, float]] | None = None
                     earnings_source="broker" if info.iv_source == "tastytrade" else "yahoo",
                     kind=kind)
 
-    # -- triggers --
-    if info.rsi_14 > cfg.rsi_max:
+    # -- which side is this name on? --
+    fade = info.rsi_14 >= cfg.rsi_min_fade and cfg.direction in ("fade", "both")
+    if not fade and (info.rsi_14 > cfg.rsi_max or cfg.direction == "fade"):
         return None                                   # never interesting
-    if vs_bb > cfg.band_tol_pct:
-        hit.misses.append(f"{vs_bb:.1f}% above band")
-    moved = (info.day_change_pct <= cfg.day_drop_pct) or \
-            (st.get("pct_5d") is not None and st["pct_5d"] <= cfg.week_drop_pct)
-    if not moved:
-        hit.misses.append("no 2%-day / 8%-week drop")
+    if fade:
+        hit.side = "fade"
+        vs_bb = (spot / info.boll_upper - 1.0) * 100.0 if info.boll_upper else -99.0
+        hit.vs_bb_pct = vs_bb                          # + = above the UPPER band
+        if vs_bb < -cfg.band_tol_pct:
+            hit.misses.append(f"{-vs_bb:.1f}% under upper band")
+        moved = (info.day_change_pct >= -cfg.day_drop_pct) or \
+                (st.get("pct_5d") is not None and st["pct_5d"] >= -cfg.week_drop_pct)
+        if not moved:
+            hit.misses.append("no 2%-day / 8%-week run")
+    else:
+        if vs_bb > cfg.band_tol_pct:
+            hit.misses.append(f"{vs_bb:.1f}% above band")
+        moved = (info.day_change_pct <= cfg.day_drop_pct) or \
+                (st.get("pct_5d") is not None and st["pct_5d"] <= cfg.week_drop_pct)
+        if not moved:
+            hit.misses.append("no 2%-day / 8%-week drop")
 
     # -- quality --
-    if vs_sma is not None and vs_sma < cfg.sma200_tol_pct:
+    if not fade and vs_sma is not None and vs_sma < cfg.sma200_tol_pct:
         hit.misses.append(f"{vs_sma:.0f}% under 200d")
         hit.flags.append(f"below 200d {vs_sma:.0f}%")
+    if fade and vs_sma is not None and vs_sma > -cfg.sma200_tol_pct * 4:   # 40%+ over the 200d: momentum monster
+        hit.flags.append(f"ROCKET +{vs_sma:.0f}% over 200d")
     if info.next_earnings is not None:
         days = (info.next_earnings - today).days
         if 0 <= days <= int(cfg.earnings_days * 7 / 5):
@@ -174,8 +208,10 @@ def evaluate(info: UnderlyingInfo, bars: list[tuple[float, float]] | None = None
         hit.misses.append(f"avg vol {st['avg_vol10'] / 1e6:.1f}M")
 
     # -- flags that do not fail it --
-    if st.get("pct_1m") is not None and st["pct_1m"] <= cfg.knife_month_pct:
+    if not fade and st.get("pct_1m") is not None and st["pct_1m"] <= cfg.knife_month_pct:
         hit.flags.append(f"KNIFE {st['pct_1m']:.0f}% 1m")
+    if fade and st.get("pct_1m") is not None and st["pct_1m"] >= -cfg.knife_month_pct:
+        hit.flags.append(f"RUNAWAY +{st['pct_1m']:.0f}% 1m — spread only, small")
     if tk in SEMIS:
         hit.flags.append("SEMIS · scalp only")
     if kind != "stock":
@@ -187,39 +223,55 @@ def evaluate(info: UnderlyingInfo, bars: list[tuple[float, float]] | None = None
         hit.status = "hit"
         return hit
     # near-miss tier: RSI passed and the band is close — shown with the reason it missed
-    if vs_bb <= cfg.near_band_pct:
+    if (fade and vs_bb >= -cfg.near_band_pct) or (not fade and vs_bb <= cfg.near_band_pct):
         hit.status = "near"
         return hit
     return None
 
 
-def pick_strike(provider: DataProvider, info: UnderlyingInfo, cfg: BounceConfig | None = None) -> dict:
-    """0.20-0.25 delta put, 30-45 DTE, nearest expiry first. {} if none."""
+def pick_strike(provider: DataProvider, info: UnderlyingInfo, cfg: BounceConfig | None = None,
+                side: str = "bounce") -> dict:
+    """bounce: the 0.20-0.25 delta put. fade: a call credit spread — short the
+    0.20-0.25 delta call, long the call ~2.5% higher (never a naked call).
+    30-45 DTE, nearest expiry first. {} if none."""
     cfg = cfg or BounceConfig()
     today = dt.date.today()
     exps = [e for e in info.expiries if cfg.min_dte <= (e - today).days <= cfg.max_dte]
+    is_put = side != "fade"
     for e in sorted(exps):
         try:
             chain = provider.chain(info.ticker, e)
         except Exception:
             continue
         t = max(chain.dte, 1) / 365.0
+        quotes = chain.puts if is_put else chain.calls
         best = None
-        for q in chain.puts:
-            if q.mid <= 0 or q.iv <= 0 or q.strike >= chain.spot:
+        for q in quotes:
+            if q.mid <= 0 or q.iv <= 0 or (q.strike >= chain.spot if is_put else q.strike <= chain.spot):
                 continue
             try:
-                d = abs(bs.put_delta(chain.spot, q.strike, q.iv, t, q=info.dividend_yield))
+                d = abs((bs.put_delta if is_put else bs.call_delta)(chain.spot, q.strike, q.iv, t,
+                                                                    q=info.dividend_yield))
             except ValueError:
                 continue
             if cfg.delta_lo <= d <= cfg.delta_hi:
                 score = abs(d - (cfg.delta_lo + cfg.delta_hi) / 2)
                 if best is None or score < best[0]:
                     best = (score, q, d)
-        if best:
-            _, q, d = best
-            return {"strike": q.strike, "delta": round(d, 2), "credit": round(q.mid * chain.multiplier),
-                    "expiry": e, "dte": chain.dte}
+        if not best:
+            continue
+        _, q, d = best
+        out = {"strike": q.strike, "delta": round(d, 2), "credit": round(q.mid * chain.multiplier),
+               "expiry": e, "dte": chain.dte}
+        if not is_put:
+            target = q.strike * (1 + cfg.spread_width_pct / 100.0)
+            longs = sorted((x for x in quotes if x.strike > q.strike and x.mid > 0), key=lambda x: x.strike)
+            wing = next((x for x in longs if x.strike >= target), longs[-1] if longs else None)
+            if wing is None:
+                continue
+            out["long_strike"] = wing.strike
+            out["credit"] = round((q.mid - wing.mid) * chain.multiplier)
+        return out
     return {}
 
 
@@ -255,7 +307,7 @@ def run_bounce(provider: DataProvider, tickers: list[str], cfg: BounceConfig | N
             if hit is not None:
                 if price_strikes and hit.status == "hit":
                     try:
-                        hit.__dict__.update(pick_strike(provider, info, cfg))
+                        hit.__dict__.update(pick_strike(provider, info, cfg, side=hit.side))
                     except Exception:
                         pass
                 out.append(hit)
@@ -269,13 +321,14 @@ def to_rows(hits: list[BounceHit]) -> list[dict]:
     rows = []
     for h in hits:
         rows.append({
+            "Side": "🏀 bounce" if h.side == "bounce" else "🪂 fade",
             "Ticker": h.ticker, "Price": round(h.price, 2), "Day %": round(h.day_pct, 2),
-            "RSI": round(h.rsi, 1), "% vs lower BB": round(h.vs_bb_pct, 2),
+            "RSI": round(h.rsi, 1), "% vs band": round(h.vs_bb_pct, 2),
             "5-day %": round(h.pct_5d, 1) if h.pct_5d is not None else None,
             "1-mo %": round(h.pct_1m, 1) if h.pct_1m is not None else None,
             "vs 200d %": round(h.vs_sma200_pct, 1) if h.vs_sma200_pct is not None else None,
             "Earnings": h.earnings_txt,
-            "Put strike": h.strike, "Δ": h.delta, "Expiry": h.expiry.strftime("%m/%d/%Y") if h.expiry else None,
+            "Trade": h.trade, "Δ": h.delta, "Expiry": h.expiry.strftime("%m/%d/%Y") if h.expiry else None,
             "DTE": h.dte, "Est. credit $": h.credit,
             "Flags": " · ".join(h.flags),
             "Status": "HIT" if h.status == "hit" else "near: " + "; ".join(h.misses),
@@ -286,8 +339,11 @@ def to_rows(hits: list[BounceHit]) -> list[dict]:
 def summary(hits: list[BounceHit]) -> str:
     real = [h for h in hits if h.status == "hit"]
     near = [h for h in hits if h.status == "near"]
-    top = ", ".join(f"{h.ticker} (RSI {h.rsi:.0f})" for h in real[:5])
     s = f"{len(real)} hit(s), {len(near)} near-miss(es)."
-    if real:
-        s += f" Top by bounce odds: {top}."
+    b = [h for h in real if h.side == "bounce"][:5]
+    f = [h for h in real if h.side == "fade"][:5]
+    if b:
+        s += " Bounce (sell puts): " + ", ".join(f"{h.ticker} (RSI {h.rsi:.0f})" for h in b) + "."
+    if f:
+        s += " Fade (call credit spreads): " + ", ".join(f"{h.ticker} (RSI {h.rsi:.0f})" for h in f) + "."
     return s

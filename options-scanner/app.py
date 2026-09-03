@@ -260,11 +260,12 @@ TAB_HELP = {
     "plan": ("📋 Trade Plan", "Everything from the scan boiled down to actions: are you inside your "
              "rules, what needs managing in the book, the top-ranked setups, earnings to avoid, "
              "alerts, and the print button."),
-    "bounce": ("🏀 Bounce", "Beaten-down quality names set up for a 1-3 day bounce: RSI 32 or "
+    "bounce": ("🏀 Bounce / 🪂 Fade", "Daily-chart extremes for 1-3 day trades. Bounce: RSI 32 or "
                "under, at or through the lower Bollinger Band, down 2% today or 8% on the week, "
-               "still within 10% of the 200-day, no earnings this week. Sell the 0.20-0.25 delta "
-               "put 30-45 days out and close it in a day or three. Near-misses are shown "
-               "separately with the reason they missed."),
+               "within 10% of the 200-day, no earnings this week → sell the 0.20-0.25 delta put. "
+               "Fade: RSI 70 or over, at or through the upper band, up 2% today or 8% on the week "
+               "→ sell a 0.20-0.25 delta call credit spread. Close in a day or three. Near-misses "
+               "are shown with the reason they missed."),
     "csp": ("📉 Puts / Wheel", "Cash- or margin-secured puts that passed your filters. Cards = plain "
             "English on the best strike per name. Table = every column and every strike. Score blends "
             "yield, probability, IV Rank, expected-move cushion and the technicals."),
@@ -609,9 +610,15 @@ with tab_bounce:
     st.caption("Runs on its own — no income scan needed. Universe: every stock in the scanner's "
                "large-cap universe, the 18 bounce ETFs, and the 8 futures roots. Banned names "
                "(CRDO SLV AAL NFLX) are dropped; semis are flagged scalp-only, never dropped.")
+    _b_dir = st.radio("Direction", ["🏀 Bounce — RSI ≤ 32, sell puts", "🪂 Fade — RSI ≥ 70, call credit spreads", "Both"],
+                      horizontal=True, key="b_dir",
+                      help="Daily chart. Bounce = washed out at the lower band, sell a 0.20-0.25Δ put. "
+                           "Fade = overbought at the upper band, sell a 0.20-0.25Δ call spread (never naked).")
     with st.expander("Bounce settings"):
         _b1, _b2, _b3, _b4 = st.columns(4)
-        _b_rsi = _b1.number_input("RSI ≤", value=32.0, step=1.0, key="b_rsi")
+        _b_rsi = _b1.number_input("RSI ≤ (bounce)", value=32.0, step=1.0, key="b_rsi")
+        _b_rsi_hi = _b1.number_input("RSI ≥ (fade)", value=70.0, step=1.0, key="b_rsi_hi")
+        _b_vol = _b1.number_input("Min 10-day avg volume (M)", value=1.0, step=0.5, key="b_vol")
         _b_band = _b2.number_input("Band tolerance % above", value=1.0, step=0.5, key="b_band")
         _b_day = _b3.number_input("Day drop ≤ %", value=-2.0, step=0.5, key="b_day")
         _b_week = _b4.number_input("5-day drop ≤ %", value=-8.0, step=1.0, key="b_week")
@@ -626,7 +633,10 @@ with tab_bounce:
                            help="2-3x products decay, so the 200-day rule is loose on them; they are "
                                 "flagged LEVERAGED and belong to day trades only.")
     if st.button("🏀 Run BOUNCE scan", type="primary", key="b_go"):
-        _bcfg = _bounce.BounceConfig(rsi_max=_b_rsi, band_tol_pct=_b_band, day_drop_pct=_b_day,
+        _bcfg = _bounce.BounceConfig(direction={"🏀": "bounce", "🪂": "fade"}.get(_b_dir[:1], "both"),
+                                     rsi_max=_b_rsi, rsi_min_fade=_b_rsi_hi,
+                                     min_avg_volume=float(_b_vol) * 1e6,
+                                     band_tol_pct=_b_band, day_drop_pct=_b_day,
                                      week_drop_pct=_b_week, sma200_tol_pct=_b_sma,
                                      earnings_days=int(_b_earn), min_dte=_b_dte[0], max_dte=_b_dte[1],
                                      delta_lo=_b_delta[0], delta_hi=_b_delta[1])
@@ -644,6 +654,14 @@ with tab_bounce:
         from datetime import datetime as _dtn
         from zoneinfo import ZoneInfo as _ZI
         st.session_state.bounce = (_hits, _berr, _dtn.now(_ZI("America/New_York")), len(_tks))
+        from scanner import movers as _movers
+        try:
+            _stk = [x.ticker for x in DEFAULT_UNIVERSE if "futures" not in x.tags and "leveraged" not in x.tags]
+            st.session_state.movers = _movers.top_movers(_prov, _stk, n=5, min_avg_volume=float(_b_vol) * 1e6,
+                                                         tags=_tags_all)
+        except Exception as exc:
+            st.session_state.movers = ([], [])
+            st.caption(f"Movers unavailable: {exc}")
     if st.session_state.get("bounce"):
         _hits, _berr, _bwhen, _bn = st.session_state.bounce
         st.caption(f"🕐 {_bwhen:%m/%d %I:%M:%S %p ET} · {_bn} names checked"
@@ -653,9 +671,9 @@ with tab_bounce:
         st.markdown(f"**{_bounce.summary(_hits)}**")
         _bnum = st.column_config.NumberColumn
         _bcols = {"Price": _bnum(format="%.2f"), "Day %": _bnum(format="%+.2f%%"), "RSI": _bnum(format="%.1f"),
-                  "% vs lower BB": _bnum(format="%+.2f%%"), "5-day %": _bnum(format="%+.1f%%"),
+                  "% vs band": _bnum(format="%+.2f%%"), "5-day %": _bnum(format="%+.1f%%"),
                   "1-mo %": _bnum(format="%+.1f%%"), "vs 200d %": _bnum(format="%+.1f%%"),
-                  "Put strike": _bnum(format="%g"), "Δ": _bnum(format="%.2f"), "Est. credit $": _bnum(format="$%d")}
+                  "Δ": _bnum(format="%.2f"), "Est. credit $": _bnum(format="$%d")}
         if _real:
             st.subheader("✅ Hits — all three triggers and the quality bar")
             st.dataframe(pd.DataFrame(_bounce.to_rows(_real)).drop(columns=["Status"]),
@@ -665,13 +683,35 @@ with tab_bounce:
                     "the red day, and today's bounce is yesterday's hit.")
         if _b_near and _near:
             st.subheader("🟡 Near-misses — and why")
-            st.dataframe(pd.DataFrame(_bounce.to_rows(_near)).drop(columns=["Put strike", "Δ", "Expiry", "DTE", "Est. credit $"]),
+            st.dataframe(pd.DataFrame(_bounce.to_rows(_near)).drop(columns=["Trade", "Δ", "Expiry", "DTE", "Est. credit $"]),
                          use_container_width=True, hide_index=True, column_config=_bcols)
         if _hits:
             st.download_button("Download CSV", pd.DataFrame(_bounce.to_rows(_hits)).to_csv(index=False),
                                "bounce.csv", key="b_csv")
         st.caption("Earnings dates marked ? are Yahoo estimates; the broker's expected date shows "
-                   "without the mark. Strike and credit are from the live chain at 0.20-0.25 delta.")
+                   "without the mark. Trades come from the live chain at 0.20-0.25 delta: a put for "
+                   "bounces, a call credit spread (short call + long call ~2.5% higher) for fades — "
+                   "never a naked call. '% vs band' is the lower band for bounces, the upper for fades.")
+    if st.session_state.get("movers"):
+        from scanner import movers as _movers
+        _lo, _wi = st.session_state.movers
+        st.subheader("🔄 Yesterday's biggest losers and winners")
+        st.caption("Rotation list: the last completed session's five worst and five best in the liquid "
+                   "universe, with today's follow-through. Losers that read 'bouncing' are the trade; "
+                   "winners that read 'fading' are call-spread candidates.")
+        _story = _movers.sector_story(_lo, _wi)
+        if _story:
+            st.markdown(f"**{_story}**")
+        _m1, _m2 = st.columns(2)
+        _mcols = {"Yesterday %": st.column_config.NumberColumn(format="%+.2f%%"),
+                  "Today %": st.column_config.NumberColumn(format="%+.2f%%"),
+                  "Yesterday close": st.column_config.NumberColumn(format="%.2f")}
+        with _m1:
+            st.markdown("**📉 Losers**")
+            st.dataframe(pd.DataFrame(_movers.to_rows(_lo)), hide_index=True, use_container_width=True, column_config=_mcols)
+        with _m2:
+            st.markdown("**📈 Winners**")
+            st.dataframe(pd.DataFrame(_movers.to_rows(_wi)), hide_index=True, use_container_width=True, column_config=_mcols)
     with st.expander("📟 TradingView alert mirror (1D, once per bar close)"):
         st.code(_bounce.TV_ALERT, language="javascript")
 

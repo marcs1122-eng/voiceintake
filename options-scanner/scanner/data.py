@@ -142,6 +142,11 @@ class DataProvider:
         average and the 10-day average volume."""
         return []
 
+    def last_bar_date(self, ticker: str) -> dt.date | None:
+        """Date of the last daily bar daily_bars() returns (today while the
+        session is open, else the last completed session). None if unknown."""
+        return None
+
     def underlying(self, ticker: str) -> UnderlyingInfo:
         raise NotImplementedError
 
@@ -181,6 +186,13 @@ class YFinanceProvider(DataProvider):
         if ticker not in cache:
             cache[ticker] = self._ticker(ticker).history(period="1y", auto_adjust=True, actions=True)
         return cache[ticker]
+
+    def last_bar_date(self, ticker: str) -> dt.date | None:
+        try:
+            h = self._hist(ticker)
+            return h.index[-1].date() if h is not None and not h.empty else None
+        except Exception:
+            return None
 
     def daily_bars(self, ticker: str, n: int = 260) -> list[tuple[float, float]]:
         try:
@@ -436,6 +448,9 @@ class SyntheticProvider(DataProvider):
             dividend_yield=round(rng.choice([0.0, 0.0, 0.015, 0.03, 0.045]), 3),
             liquidity_rating=rng.randint(1, 4), iv_source="synthetic",
         )
+
+    def last_bar_date(self, ticker: str) -> dt.date | None:
+        return dt.date.today()
 
     def daily_bars(self, ticker: str, n: int = 260) -> list[tuple[float, float]]:
         rng = self._rng(ticker + ":bars")

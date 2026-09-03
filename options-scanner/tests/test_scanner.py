@@ -1175,3 +1175,76 @@ def test_leveraged_only_when_asked():
     assert {"TQQQ", "SOXL", "SPXL", "TNA", "NVDL"} <= lev and "SPY" not in lev
     both = {s.ticker for s in select_by_tags(DEFAULT_UNIVERSE, {"etf", "leveraged"})}
     assert "SPY" in both and "TQQQ" in both
+
+
+def test_fade_side_and_volume_floor():
+    import datetime as _d
+    from scanner import bounce
+    from scanner.data import UnderlyingInfo
+
+    today = _d.date(2026, 9, 3)
+    assert bounce.BounceConfig().min_avg_volume == 1_000_000.0
+
+    def info(tk, spot, rsi, lower, upper, day):
+        return UnderlyingInfo(ticker=tk, spot=spot, day_change_pct=day, pct_off_52w_high=0,
+                              hist_vol_20d=0.3, rsi_14=rsi, boll_lower=lower, boll_upper=upper)
+    flat = [(100.0, 3e6)] * 260
+    both = bounce.BounceConfig(direction="both")
+    # overbought, through the upper band, +3% day → fade hit
+    f = bounce.evaluate(info("GC", 104.0, 74.0, 90.0, 103.0, +3.1), flat, both, today)
+    assert f is not None and f.side == "fade" and f.status == "hit" and f.vs_bb_pct > 0
+    # same name in bounce-only mode is ignored; in fade-only mode an oversold name is ignored
+    assert bounce.evaluate(info("GC", 104.0, 74.0, 90.0, 103.0, +3.1), flat, bounce.BounceConfig(direction="bounce"), today) is None
+    assert bounce.evaluate(info("KO", 88.0, 25.0, 89.0, 100.0, -3.0), flat, bounce.BounceConfig(direction="fade"), today) is None
+    # 2% under the upper band with no run → near-miss with the reason
+    n = bounce.evaluate(info("XLE", 100.0, 71.0, 90.0, 102.0, +0.5), flat, both, today)
+    assert n.status == "near" and any("under upper band" in m for m in n.misses)
+    # runaway flag on a +30% month
+    run = [(76.0, 3e6)] * 239 + [(100.0, 3e6)] * 21
+    r = bounce.evaluate(info("PLTR", 100.0, 78.0, 80.0, 99.5, +4.0), run, both, today)
+    assert any(x.startswith("RUNAWAY") for x in r.flags)
+    # ranking: fades rank most-overbought first
+    f2 = bounce.evaluate(info("XLK", 104.0, 71.0, 90.0, 103.0, +2.5), flat, both, today)
+    assert sorted([f2, f], key=lambda h: h.rank_key)[0] is f
+    # volume floor: 0.8M average fails, 1.2M passes
+    thin = [(50.0, 0.8e6)] * 260
+    ok = [(50.0, 1.2e6)] * 260
+    assert "avg vol 0.8M" in bounce.evaluate(info("CMI", 49.0, 26.0, 49.5, 60.0, -2.5), thin, both, today).misses
+    assert bounce.evaluate(info("CMI", 49.0, 26.0, 49.5, 60.0, -2.5), ok, both, today).status == "hit"
+    # fade strike is a call credit spread on synthetic chains
+    prov = SyntheticProvider()
+    i = prov.underlying("SPY")
+    pick = bounce.pick_strike(prov, i, both, side="fade")
+    assert pick and pick["long_strike"] > pick["strike"] > i.spot and 0.20 <= pick["delta"] <= 0.25
+    hit = bounce.BounceHit(ticker="SPY", price=i.spot, day_pct=2, rsi=72, vs_bb_pct=1, pct_5d=9, pct_1m=5,
+                           vs_sma200_pct=5, avg_vol=5e6, earnings=None, side="fade", **{k: pick[k] for k in ("strike", "long_strike", "delta", "credit", "expiry", "dte")})
+    assert "call credit spread" in hit.trade and "🪂 fade" == bounce.to_rows([hit])[0]["Side"]
+    assert "ta.crossover(rsiV, 70)" in bounce.TV_ALERT
+
+
+def test_movers_rotation_list():
+    import datetime as _d
+    from scanner import movers
+
+    class P(SyntheticProvider):
+        def daily_bars(self, ticker, n=260):
+            base = {"A": [100, 90, 95], "B": [100, 110, 108], "C": [100, 99, 99], "D": [10, 9, 9]}.get(ticker, [100, 100, 100])
+            return [(float(c), 5e6) for c in base]
+
+        def last_bar_date(self, ticker):
+            return _d.date.today()          # session open → last bar is today's partial
+
+    lo, wi = movers.top_movers(P(), ["A", "B", "C", "D"], n=5, tags={})
+    assert [m.ticker for m in lo] == ["A", "C"] and lo[0].yday_pct == pytest.approx(-10.0)
+    assert lo[0].today_pct == pytest.approx(5.56, abs=0.01) and lo[0].follow_through == "bouncing"
+    assert [m.ticker for m in wi] == ["B"] and wi[0].follow_through == "fading"
+    assert "D" not in [m.ticker for m in lo]        # under $15
+    rows = movers.to_rows(lo)
+    assert rows[0]["Now"] == "bouncing" and rows[0]["Yesterday %"] == -10.0
+    # before the open the last bar IS yesterday → no today column
+    class Q(P):
+        def last_bar_date(self, ticker):
+            return _d.date.today() - _d.timedelta(days=1)
+    _, wi2 = movers.top_movers(Q(), ["A"], tags={})
+    assert wi2[0].yday_pct == pytest.approx(5.56, abs=0.01) and wi2[0].today_pct is None and wi2[0].follow_through == ""
+    assert isinstance(movers.sector_story(lo, wi), str)
