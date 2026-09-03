@@ -136,6 +136,12 @@ class DataProvider:
         to tell whether a short strike was ever tested. None if unknown."""
         return None
 
+    def daily_bars(self, ticker: str, n: int = 260) -> list[tuple[float, float]]:
+        """Up to n daily (close, volume) pairs, oldest first. [] if unknown.
+        Used by the BOUNCE scan for the 5-day / 1-month moves, the 200-day
+        average and the 10-day average volume."""
+        return []
+
     def underlying(self, ticker: str) -> UnderlyingInfo:
         raise NotImplementedError
 
@@ -168,6 +174,26 @@ class YFinanceProvider(DataProvider):
         self._tickers: dict[str, object] = {}
         self._info_cache: dict[str, UnderlyingInfo] = {}
 
+    def _hist(self, ticker: str):
+        cache = getattr(self, "_hist_cache", None)
+        if cache is None:
+            cache = self._hist_cache = {}
+        if ticker not in cache:
+            cache[ticker] = self._ticker(ticker).history(period="1y", auto_adjust=True, actions=True)
+        return cache[ticker]
+
+    def daily_bars(self, ticker: str, n: int = 260) -> list[tuple[float, float]]:
+        try:
+            h = self._hist(ticker)
+        except Exception:
+            return []
+        if h is None or h.empty:
+            return []
+        h = h.tail(n)
+        vol = h["Volume"] if "Volume" in h.columns else None
+        return [(float(c), float(vol.iloc[i]) if vol is not None else 0.0)
+                for i, c in enumerate(h["Close"].tolist())]
+
     def _ticker(self, ticker: str):
         # Futures roots ("/ES") map to Yahoo continuous contracts ("ES=F")
         # for price history; Yahoo has no futures OPTIONS chains, so those
@@ -184,7 +210,7 @@ class YFinanceProvider(DataProvider):
         if ticker in self._info_cache:
             return self._info_cache[ticker]
         t = self._ticker(ticker)
-        hist = t.history(period="1y", auto_adjust=True, actions=True)
+        hist = self._hist(ticker)
         if hist.empty:
             raise ValueError(f"no price history for {ticker}")
         close = hist["Close"]
@@ -410,6 +436,18 @@ class SyntheticProvider(DataProvider):
             dividend_yield=round(rng.choice([0.0, 0.0, 0.015, 0.03, 0.045]), 3),
             liquidity_rating=rng.randint(1, 4), iv_source="synthetic",
         )
+
+    def daily_bars(self, ticker: str, n: int = 260) -> list[tuple[float, float]]:
+        rng = self._rng(ticker + ":bars")
+        spot, iv = self._spot_iv(ticker)
+        daily = iv / math.sqrt(TRADING_DAYS)
+        # walk backwards from spot so the last close is today's spot
+        closes = [spot]
+        for _ in range(n - 1):
+            closes.append(closes[-1] / (1.0 + rng.gauss(0.0004, daily)))
+        closes.reverse()
+        base_vol = rng.uniform(0.8e6, 25e6)
+        return [(round(c, 2), round(base_vol * rng.uniform(0.6, 1.6))) for c in closes]
 
     def history_lows(self, ticker: str, since: dt.date) -> float | None:
         # deterministic: the low since any date is 3-9% under spot,

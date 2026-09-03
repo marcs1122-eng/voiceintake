@@ -232,6 +232,9 @@ class TastytradeProvider(DataProvider):
         # daily bars still come from Yahoo; the streamer only backfills days
         return self._yahoo().history_lows(ticker, since)
 
+    def daily_bars(self, ticker: str, n: int = 260) -> list[tuple[float, float]]:
+        return self._yahoo().daily_bars(ticker, n)
+
     # Bars of history to backfill per timeframe (enough for a 50-bar SMA).
     _CANDLE_LOOKBACK = {"5m": dt.timedelta(days=3), "10m": dt.timedelta(days=5),
                         "1h": dt.timedelta(days=14), "4h": dt.timedelta(days=45)}

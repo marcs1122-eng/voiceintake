@@ -155,3 +155,14 @@ Headlines are scored — macro words (Fed, CPI, jobs, tariffs, oil) and mentions
 of your names score highest — and split into market-moving, your names, and
 the rest. No API key; refreshes every 10 minutes. Scoring lives in
 `scanner/news.py` and is unit-tested against sample feed data.
+
+## BOUNCE scan
+
+A daily mode for 1-3 day put sales on beaten-down quality names. Trigger:
+RSI(14) ≤ 32, close at/through the lower Bollinger Band (20, 2) or within 1%
+above it, and down 2%+ on the day or 8%+ over 5 sessions. Quality: within 10%
+of the 200-day, no earnings inside 5 trading days. Ranked by RSI, distance
+below the band, then the 5-day drop; KNIFE (−25% in a month) and SEMIS flags.
+Suggested strike is the 0.20-0.25 delta put 30-45 days out from the live
+chain. Engine: `scanner/bounce.py` (with a TradingView alert mirror in
+`TV_ALERT`); tab: 🏀 Bounce.

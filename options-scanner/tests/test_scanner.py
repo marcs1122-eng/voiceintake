@@ -1108,3 +1108,59 @@ def test_untested_roll_and_gap_filter_and_presets():
     known = {s.ticker for s in DEFAULT_UNIVERSE}
     names = present.diversify_universe([("XLE", -0.12), ("FXI", 0.08), ("ZN=F", 0.18)], known)
     assert "XLE" in names and "/ZN" in names and all(t in known or t.startswith("/") for t in names)
+
+
+def test_bounce_evaluate_and_scan():
+    import datetime as _d
+    from scanner import bounce
+    from scanner.data import UnderlyingInfo
+
+    today = _d.date(2026, 9, 3)
+
+    def info(tk, spot, rsi, band, day, earn=None):
+        return UnderlyingInfo(ticker=tk, spot=spot, day_change_pct=day, pct_off_52w_high=-20,
+                              hist_vol_20d=0.3, rsi_14=rsi, boll_lower=band, next_earnings=earn)
+
+    def bars(last, n=260, drift=0.0, month_drop=0.0):
+        closes = [last * (1 + drift) ** (n - 1 - i) for i in range(n)]
+        if month_drop:
+            closes = closes[:-22] + [closes[-22] * (1 + month_drop * (j + 1) / 22) for j in range(22)]
+            closes[-1] = last
+        return [(c, 3e6) for c in closes]
+
+    # a clean hit: RSI 27, 2% under the band, -7.3% day, earnings far out
+    h = bounce.evaluate(info("TSN", 51.7, 27.1, 52.8, -7.3, _d.date(2026, 11, 16)),
+                        bars(51.7, drift=0.0003), today=today)
+    assert h is not None and h.status == "hit" and h.vs_bb_pct < 0 and h.misses == []
+    # same name 15% under its 200-day → quality fails → near-miss with the reason
+    h2 = bounce.evaluate(info("TSN", 51.7, 27.1, 52.8, -7.3), bars(51.7, drift=0.002), today=today)
+    assert h2 is not None and h2.status == "near" and any("under 200d" in m for m in h2.misses)
+    # earnings in 4 days → fails quality
+    h3 = bounce.evaluate(info("SUNB", 65.3, 26.9, 65.9, -2.6, _d.date(2026, 9, 8)), bars(65.3), today=today)
+    assert h3.status == "near" and any("earnings 09/08" in m for m in h3.misses) and "earnings 09/08" in h3.flags
+    # 5% above the band with a green day → near, reason recorded; no move at all → still near if band close
+    h4 = bounce.evaluate(info("TJX", 131.7, 20.6, 124.95, +0.27), bars(131.7), today=today)
+    assert h4.status == "near" and "5.4% above band" in h4.misses[0]
+    # RSI 40 → nothing; banned → nothing; sub-$15 → nothing
+    assert bounce.evaluate(info("KO", 60, 40, 59, -3), bars(60), today=today) is None
+    assert bounce.evaluate(info("CRDO", 165, 31, 176, 0.2), bars(165), today=today) is None
+    assert bounce.evaluate(info("F", 10, 25, 10.5, -3), bars(10), today=today) is None
+    # knife + semis flags
+    h5 = bounce.evaluate(info("MU", 100, 28, 101, -3), bars(100, month_drop=-0.30), today=today)
+    assert any(f.startswith("KNIFE") for f in h5.flags) and "SEMIS · scalp only" in h5.flags
+    # ranking: hits before near-misses, lowest RSI first
+    ranked = sorted([h4, h, h5], key=lambda x: x.rank_key)
+    assert ranked[0] is h and ranked[-1].status == "near"
+    assert "TSN" in [r["Ticker"] for r in bounce.to_rows(ranked)] and "hit(s)" in bounce.summary(ranked)
+    assert "ta.crossunder(rsiV, 32)" in bounce.TV_ALERT
+
+    # full scan on synthetic data: runs, prices strikes on hits, returns rows
+    prov = SyntheticProvider()
+    tickers = [s.ticker for s in DEFAULT_UNIVERSE if "futures" not in s.tags][:40] + ["/ZN", "/GC"]
+    hits, errs = bounce.run_bounce(prov, tickers, today=today)
+    assert not errs
+    assert all(h.rsi <= 32 for h in hits)
+    for h in hits:
+        if h.status == "hit" and h.strike:
+            assert 0.20 <= h.delta <= 0.25 and 30 <= h.dte <= 45 and h.credit > 0
+    assert len(prov.daily_bars("SPY", 260)) == 260 and prov.daily_bars("SPY", 260)[-1][0] == prov.underlying("SPY").spot

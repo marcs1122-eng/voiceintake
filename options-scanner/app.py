@@ -90,6 +90,28 @@ try:
 except Exception:
     TASTY_AVAILABLE = False
 
+def _make_provider(tf: str):
+    """Demo → synthetic; tastytrade when enabled; else Yahoo. Stops the app with
+    a readable message when the chosen source cannot start."""
+    if demo:
+        from scanner.data import SyntheticProvider
+        return SyntheticProvider(timeframe=tf)
+    if use_tasty:
+        try:
+            from scanner.tastytrade_provider import TastytradeProvider
+            return TastytradeProvider(timeframe=tf)
+        except Exception as exc:
+            st.error(f"tastytrade login failed: {exc}")
+            st.stop()
+    try:
+        from scanner.data import YFinanceProvider
+        return YFinanceProvider(timeframe=tf)
+    except ImportError:
+        st.error("yfinance isn't installed. `pip install -r requirements.txt`, "
+                 "or flip on Demo mode.")
+        st.stop()
+
+
 def _tasty():
     """One tastytrade session per browser session (login is slow; never redo it per rerun)."""
     if not TASTY_AVAILABLE:
@@ -179,24 +201,7 @@ if go:
         except Exception as exc:
             st.warning(f"Couldn't work out the diversifiers ({exc}); scanning the whole universe.")
 
-    if demo:
-        from scanner.data import SyntheticProvider
-        provider = SyntheticProvider(timeframe=timeframe)
-    elif use_tasty:
-        try:
-            from scanner.tastytrade_provider import TastytradeProvider
-            provider = TastytradeProvider(timeframe=timeframe)
-        except Exception as exc:
-            st.error(f"tastytrade login failed: {exc}")
-            st.stop()
-    else:
-        try:
-            from scanner.data import YFinanceProvider
-            provider = YFinanceProvider(timeframe=timeframe)
-        except ImportError:
-            st.error("yfinance isn't installed. `pip install -r requirements.txt`, "
-                     "or flip on Demo mode.")
-            st.stop()
+    provider = _make_provider(timeframe)
 
     cfg = ScanConfig(min_dte=dte[0], max_dte=dte[1], delta_min=delta[0],
                      delta_max=delta[1], min_annualized_pct=min_annual,
@@ -254,6 +259,11 @@ TAB_HELP = {
     "plan": ("📋 Trade Plan", "Everything from the scan boiled down to actions: are you inside your "
              "rules, what needs managing in the book, the top-ranked setups, earnings to avoid, "
              "alerts, and the print button."),
+    "bounce": ("🏀 Bounce", "Beaten-down quality names set up for a 1-3 day bounce: RSI 32 or "
+               "under, at or through the lower Bollinger Band, down 2% today or 8% on the week, "
+               "still within 10% of the 200-day, no earnings this week. Sell the 0.20-0.25 delta "
+               "put 30-45 days out and close it in a day or three. Near-misses are shown "
+               "separately with the reason they missed."),
     "csp": ("📉 Puts / Wheel", "Cash- or margin-secured puts that passed your filters. Cards = plain "
             "English on the best strike per name. Table = every column and every strike. Score blends "
             "yield, probability, IV Rank, expected-move cushion and the technicals."),
@@ -436,9 +446,9 @@ if have_result:
     with st.expander("🖨️ Print today's plan", expanded=False):
         _print_block("top")
 
-(tab_plan, tab_csp, tab_ic, tab_bwb, tab_dip, tab_scalp, tab_news, tab_score, tab_pos,
- tab_corr) = st.tabs(
-    ["📋 Trade Plan", "📉 Puts / Wheel", "🦅 Iron Condors", "🦋 Broken Wing Flies",
+(tab_plan, tab_bounce, tab_csp, tab_ic, tab_bwb, tab_dip, tab_scalp, tab_news, tab_score,
+ tab_pos, tab_corr) = st.tabs(
+    ["📋 Trade Plan", "🏀 Bounce", "📉 Puts / Wheel", "🦅 Iron Condors", "🦋 Broken Wing Flies",
      "🔻 Quality Dips", "⚡ Scalp", "📰 News", "📈 Scorecard", "💼 Positions", "🔗 Correlation"])
 
 
@@ -591,6 +601,74 @@ with tab_plan:
         st.caption("Exit plan for anything you open: 25% of max on day one, 30% on "
                    "day two, then 50% or the 21-DTE window — same rules the "
                    "Positions tab enforces.")
+
+with tab_bounce:
+    _tab_head("bounce")
+    from scanner import bounce as _bounce
+    st.caption("Runs on its own — no income scan needed. Universe: every stock in the scanner's "
+               "large-cap universe, the 18 bounce ETFs, and the 8 futures roots. Banned names "
+               "(CRDO SLV AAL NFLX) are dropped; semis are flagged scalp-only, never dropped.")
+    with st.expander("Bounce settings"):
+        _b1, _b2, _b3, _b4 = st.columns(4)
+        _b_rsi = _b1.number_input("RSI ≤", value=32.0, step=1.0, key="b_rsi")
+        _b_band = _b2.number_input("Band tolerance % above", value=1.0, step=0.5, key="b_band")
+        _b_day = _b3.number_input("Day drop ≤ %", value=-2.0, step=0.5, key="b_day")
+        _b_week = _b4.number_input("5-day drop ≤ %", value=-8.0, step=1.0, key="b_week")
+        _b5, _b6, _b7, _b8 = st.columns(4)
+        _b_sma = _b5.number_input("Max % below 200-day", value=-10.0, step=1.0, key="b_sma")
+        _b_earn = _b6.number_input("Earnings-free trading days", value=5, step=1, key="b_earn")
+        _b_dte = _b7.slider("DTE", 14, 60, (30, 45), key="b_dte")
+        _b_delta = _b8.slider("Put delta", 0.10, 0.40, (0.20, 0.25), step=0.01, key="b_delta")
+        _b_near = st.toggle("Show near-misses (RSI passes, band within 6%) with the reason", value=True, key="b_near")
+    if st.button("🏀 Run BOUNCE scan", type="primary", key="b_go"):
+        _bcfg = _bounce.BounceConfig(rsi_max=_b_rsi, band_tol_pct=_b_band, day_drop_pct=_b_day,
+                                     week_drop_pct=_b_week, sma200_tol_pct=_b_sma,
+                                     earnings_days=int(_b_earn), min_dte=_b_dte[0], max_dte=_b_dte[1],
+                                     delta_lo=_b_delta[0], delta_hi=_b_delta[1])
+        _prov = st.session_state.get("provider") or _make_provider("1d")
+        st.session_state.provider = _prov
+        _tks = [x.ticker for x in DEFAULT_UNIVERSE if "futures" not in x.tags and x.ticker not in _bounce.BANNED]
+        for x in _bounce.BOUNCE_ETFS + _bounce.BOUNCE_FUTURES:
+            if x not in _tks:
+                _tks.append(x)
+        _bar = st.progress(0.0, text="Bounce scan…")
+        _hits, _berr = _bounce.run_bounce(
+            _prov, _tks, _bcfg,
+            progress=lambda i, n, t: _bar.progress((i + 1) / n, text=f"Bounce: {t} ({i + 1}/{n})"))
+        _bar.empty()
+        from datetime import datetime as _dtn
+        from zoneinfo import ZoneInfo as _ZI
+        st.session_state.bounce = (_hits, _berr, _dtn.now(_ZI("America/New_York")), len(_tks))
+    if st.session_state.get("bounce"):
+        _hits, _berr, _bwhen, _bn = st.session_state.bounce
+        st.caption(f"🕐 {_bwhen:%m/%d %I:%M:%S %p ET} · {_bn} names checked"
+                   + (f" · skipped {len(_berr)} (data errors)" if _berr else ""))
+        _real = [h for h in _hits if h.status == "hit"]
+        _near = [h for h in _hits if h.status == "near"]
+        st.markdown(f"**{_bounce.summary(_hits)}**")
+        _bnum = st.column_config.NumberColumn
+        _bcols = {"Price": _bnum(format="%.2f"), "Day %": _bnum(format="%+.2f%%"), "RSI": _bnum(format="%.1f"),
+                  "% vs lower BB": _bnum(format="%+.2f%%"), "5-day %": _bnum(format="%+.1f%%"),
+                  "1-mo %": _bnum(format="%+.1f%%"), "vs 200d %": _bnum(format="%+.1f%%"),
+                  "Put strike": _bnum(format="%g"), "Δ": _bnum(format="%.2f"), "Est. credit $": _bnum(format="$%d")}
+        if _real:
+            st.subheader("✅ Hits — all three triggers and the quality bar")
+            st.dataframe(pd.DataFrame(_bounce.to_rows(_real)).drop(columns=["Status"]),
+                         use_container_width=True, hide_index=True, column_config=_bcols)
+        else:
+            st.info("No clean hits right now. On a green tape that is normal — the setup fires on "
+                    "the red day, and today's bounce is yesterday's hit.")
+        if _b_near and _near:
+            st.subheader("🟡 Near-misses — and why")
+            st.dataframe(pd.DataFrame(_bounce.to_rows(_near)).drop(columns=["Put strike", "Δ", "Expiry", "DTE", "Est. credit $"]),
+                         use_container_width=True, hide_index=True, column_config=_bcols)
+        if _hits:
+            st.download_button("Download CSV", pd.DataFrame(_bounce.to_rows(_hits)).to_csv(index=False),
+                               "bounce.csv", key="b_csv")
+        st.caption("Earnings dates marked ? are Yahoo estimates; the broker's expected date shows "
+                   "without the mark. Strike and credit are from the live chain at 0.20-0.25 delta.")
+    with st.expander("📟 TradingView alert mirror (1D, once per bar close)"):
+        st.code(_bounce.TV_ALERT, language="javascript")
 
 with tab_csp:
     _tab_head("csp")
