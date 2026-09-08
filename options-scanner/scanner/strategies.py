@@ -379,3 +379,132 @@ def build_bwb(chain: ChainSnapshot, *, body_delta: float = 0.30,
         earnings_before_expiry=earnings_before_expiry, iv_atm=atm.iv,
         multiplier=chain.multiplier,
     )
+
+
+# ---------------------------------------------------------------------------
+# Credit spreads — the defined-risk version of the put sale (and the only
+# way Mac sells calls)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class CreditSpread:
+    ticker: str
+    spot: float
+    expiry: dt.date
+    dte: int
+    side: str                  # "put" (bull put spread) | "call" (bear call spread)
+    short_strike: float
+    long_strike: float
+    credit: float              # per share, at mid (short mid − long mid)
+    short_delta: float         # absolute
+    short_iv: float
+    min_open_interest: int
+    earnings_before_expiry: bool
+    multiplier: float = 100.0
+    iv_rank: float | None = None
+    rsi_14: float = 0.0
+    entry_signals: frozenset = frozenset()
+    at_upper: bool = False     # spot at/through the upper band (call-spread tailwind)
+
+    @property
+    def width(self) -> float:
+        return abs(self.short_strike - self.long_strike)
+
+    @property
+    def max_loss(self) -> float:
+        return max(self.width - self.credit, 0.0)
+
+    @property
+    def credit_dollars(self) -> float:
+        return self.credit * self.multiplier
+
+    @property
+    def max_loss_dollars(self) -> float:
+        return self.max_loss * self.multiplier
+
+    @property
+    def credit_to_width(self) -> float:
+        return self.credit / self.width if self.width > 0 else 0.0
+
+    @property
+    def roc_pct(self) -> float:
+        return self.credit / self.max_loss * 100.0 if self.max_loss > 0 else float("inf")
+
+    @property
+    def annualized_pct(self) -> float:
+        return _annualize(min(self.roc_pct, 1000.0), self.dte)
+
+    @property
+    def breakeven(self) -> float:
+        return self.short_strike - self.credit if self.side == "put" else self.short_strike + self.credit
+
+    @property
+    def prob_otm_pct(self) -> float:
+        """P(short strike finishes out of the money), lognormal at the short strike's IV."""
+        t = _t_years(self.dte)
+        if self.side == "put":
+            return bs.prob_above(self.spot, self.short_strike, self.short_iv, t) * 100.0
+        return bs.prob_below(self.spot, self.short_strike, self.short_iv, t) * 100.0
+
+    @property
+    def is_futures(self) -> bool:
+        return self.ticker.startswith("/")
+
+    @property
+    def legs(self) -> str:
+        if self.side == "put":
+            return f"{self.long_strike:g}/{self.short_strike:g} put credit spread"
+        return f"{self.short_strike:g}/{self.long_strike:g} call credit spread"
+
+
+def build_credit_spreads(chain: ChainSnapshot, *, delta_range: tuple[float, float] = (0.20, 0.30),
+                         width_pct: float = 0.025, min_open_interest: int = 100,
+                         earnings_before_expiry: bool = False, iv_rank: float | None = None,
+                         rsi_14: float = 0.0, entry_signals: frozenset = frozenset(),
+                         at_upper: bool = False, sides: tuple[str, ...] = ("put", "call"),
+                         dividend_yield: float = 0.0) -> list[CreditSpread]:
+    """One spread per side: short strike nearest the middle of the delta band,
+    long strike the first one at least width_pct of spot further out."""
+    t = _t_years(chain.dte)
+    spot = chain.spot
+    target = (delta_range[0] + delta_range[1]) / 2.0
+    min_width = max(spot * width_pct, 0.5)
+    out: list[CreditSpread] = []
+    for side in sides:
+        quotes = [q for q in (chain.puts if side == "put" else chain.calls)
+                  if q.iv > 0 and q.mid > 0 and q.open_interest >= min_open_interest]
+        otm = [q for q in quotes if (q.strike < spot if side == "put" else q.strike > spot)]
+        if len(otm) < 2:
+            continue
+        cands = []
+        for q in otm:
+            try:
+                d = abs((bs.put_delta if side == "put" else bs.call_delta)(spot, q.strike, q.iv, t, q=dividend_yield))
+            except ValueError:
+                continue
+            cands.append((abs(d - target), d, q))
+        in_band = [c for c in cands if delta_range[0] <= c[1] <= delta_range[1]]
+        # coarse strike grids (5-point strikes on a $100 stock) can skip the band
+        # entirely; fall back to the nearest strike within 0.10 of the band edges
+        pool = in_band or [c for c in cands if delta_range[0] - 0.10 <= c[1] <= delta_range[1] + 0.10]
+        if not pool:
+            continue
+        _, d, short = min(pool, key=lambda x: x[0])
+        if side == "put":
+            wings = sorted((q for q in otm if q.strike <= short.strike - min_width), key=lambda q: -q.strike)
+        else:
+            wings = sorted((q for q in otm if q.strike >= short.strike + min_width), key=lambda q: q.strike)
+        if not wings:
+            continue
+        long = wings[0]
+        credit = short.mid - long.mid
+        if credit <= 0:
+            continue
+        out.append(CreditSpread(
+            ticker=chain.ticker, spot=spot, expiry=chain.expiry, dte=chain.dte, side=side,
+            short_strike=short.strike, long_strike=long.strike, credit=round(credit, 2),
+            short_delta=round(d, 3), short_iv=short.iv,
+            min_open_interest=min(short.open_interest, long.open_interest),
+            earnings_before_expiry=earnings_before_expiry, multiplier=chain.multiplier,
+            iv_rank=iv_rank, rsi_14=rsi_14, entry_signals=entry_signals, at_upper=at_upper))
+    return out

@@ -35,6 +35,15 @@ SCALP_FUTURES = ["/ES", "/NQ", "/RTY", "/CL", "/GC", "/SI"]
 MICRO_TWIN = {"/ES": "/MES", "/NQ": "/MNQ", "/RTY": "/M2K",
               "/CL": "/MCL", "/GC": "/MGC", "/SI": "/SIL"}
 
+# Liquid equities and ETFs for the same radar. Risk/reward is quoted per
+# 100 shares (one option contract). Semis are Mac's scalp lane; the banned
+# names (CRDO SLV AAL NFLX) are deliberately absent.
+SCALP_EQUITIES = ["SPY", "QQQ", "IWM", "TQQQ", "SOXL", "TSLA", "NVDA", "MU", "SNDK",
+                  "AMD", "AAPL", "AMZN", "META", "MSFT", "GOOGL", "AVGO", "PLTR",
+                  "COIN", "MSTR", "HOOD", "WDC", "ARM", "SMCI"]
+SCALP_DEFAULT = SCALP_FUTURES + ["SPY", "QQQ", "TSLA", "NVDA", "MU", "SNDK", "AMD", "COIN"]
+SCALP_ALL = SCALP_FUTURES + SCALP_EQUITIES
+
 # bars = (high, low, close), oldest first
 Bar = tuple[float, float, float]
 
@@ -132,7 +141,7 @@ def analyze(ticker: str, bars: list[Bar], spot: float,
         bias = "no edge"
 
     prod = product_for(ticker)
-    per_point = prod.multiplier if prod else 1.0
+    per_point = prod.multiplier if prod else 100.0     # equities: per 100 shares / one contract
 
     stop = target = risk = reward = None
     if atr > 0 and bias in ("LONG SCALP", "lean long"):
@@ -196,7 +205,12 @@ def demo_snapshot(ticker: str, timeframe: str = "5m",
     import random
     rng = random.Random(f"{seed}:{ticker}:{timeframe}")
     base = {"/ES": 7650.0, "/NQ": 29100.0, "/RTY": 2450.0,
-            "/CL": 88.0, "/GC": 4410.0, "/SI": 55.0}.get(ticker, 100.0)
+            "/CL": 88.0, "/GC": 4410.0, "/SI": 55.0,
+            "SPY": 760.0, "QQQ": 700.0, "IWM": 270.0, "TQQQ": 110.0, "SOXL": 60.0,
+            "TSLA": 420.0, "NVDA": 185.0, "MU": 250.0, "SNDK": 1700.0, "AMD": 210.0,
+            "AAPL": 260.0, "AMZN": 240.0, "META": 780.0, "MSFT": 520.0, "GOOGL": 260.0,
+            "AVGO": 355.0, "PLTR": 170.0, "COIN": 190.0, "MSTR": 145.0, "HOOD": 125.0,
+            "WDC": 130.0, "ARM": 160.0, "SMCI": 45.0}.get(ticker, 100.0)
     price, bars = base, []
     for _ in range(80):
         drift = rng.gauss(0, base * 0.0012)

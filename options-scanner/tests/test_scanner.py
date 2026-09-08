@@ -1257,3 +1257,57 @@ def test_held_names_file(tmp_path):
     assert present.held_names(str(f)) == ["CLX", "TTWO", "/ZN"]
     assert present.held_names(str(tmp_path / "missing.txt")) == []
     assert "CLX" in present.held_names()          # the repo file
+
+
+def test_credit_spreads_build_score_and_scan():
+    from scanner.scan import dedupe_spreads, score_spread
+    from scanner.strategies import build_credit_spreads
+
+    chain = _chain()
+    both = build_credit_spreads(chain, entry_signals=frozenset({"RSI<=30"}), rsi_14=27.0, iv_rank=45.0)
+    sides = {x.side for x in both}
+    assert sides == {"put", "call"}
+    for x in both:
+        assert 0.10 <= x.short_delta <= 0.40          # 5-point test grid skips the 0.20-0.30 band on the call side
+        assert x.width > 0 and x.credit > 0 and x.max_loss == pytest.approx(x.width - x.credit)
+        assert x.credit_dollars == pytest.approx(x.credit * chain.multiplier)
+        assert 0 < x.prob_otm_pct < 100
+        if x.side == "put":
+            assert x.long_strike < x.short_strike < chain.spot and x.breakeven == pytest.approx(x.short_strike - x.credit)
+            assert "put credit spread" in x.legs
+        else:
+            assert chain.spot < x.short_strike < x.long_strike and x.breakeven == pytest.approx(x.short_strike + x.credit)
+            assert "call credit spread" in x.legs
+        assert x.long_strike != x.short_strike and abs(x.long_strike - x.short_strike) >= chain.spot * 0.025 - 1e-9
+    put = next(x for x in both if x.side == "put"); call = next(x for x in both if x.side == "call")
+    cfg = ScanConfig()
+    # oversold + lower-band alignment lifts the put spread, not the call spread
+    assert score_spread(put, frozenset({"blue-chip"}), cfg) > score_spread(call, frozenset({"blue-chip"}), cfg)
+    hot = build_credit_spreads(chain, rsi_14=74.0, at_upper=True)
+    hot_call = next(x for x in hot if x.side == "call")
+    assert score_spread(hot_call, frozenset(), cfg) > score_spread(call, frozenset(), cfg)
+    # earnings penalty
+    e = build_credit_spreads(chain, earnings_before_expiry=True)[0]
+    assert score_spread(e, frozenset(), cfg) < score_spread(both[0], frozenset(), cfg)
+
+    universe = filter_universe(DEFAULT_UNIVERSE, tickers={"SPY", "AAPL", "KO", "XLE"})
+    res = run_scan(SyntheticProvider(), universe, ScanConfig(min_annualized_pct=0.0))
+    assert res.spreads and all(x.credit_to_width >= 0.25 for x in res.spreads)
+    scores = [score_spread(x, frozenset(), cfg) for x in res.spreads]
+    assert scores == sorted(scores, reverse=True)
+    best = dedupe_spreads(res.spreads)
+    assert len({(x.ticker, x.side) for x in best}) == len(best) and len(best) <= len(res.spreads)
+
+
+def test_scalp_equities_run():
+    from scanner import scalp
+    assert "TSLA" in scalp.SCALP_EQUITIES and "MU" in scalp.SCALP_EQUITIES and "SNDK" in scalp.SCALP_EQUITIES
+    assert not ({"CRDO", "SLV", "AAL", "NFLX"} & set(scalp.SCALP_ALL))
+    assert set(scalp.SCALP_DEFAULT) <= set(scalp.SCALP_ALL)
+    bars, spot, lo, hi = scalp.demo_snapshot("TSLA", "5m")
+    r = scalp.analyze("TSLA", bars, spot, lo, hi)
+    assert r.per_point == 100.0 and r.micro == "" and r.name == "TSLA" and 300 < r.spot < 600
+    rows, errs = scalp.run_scalp_scan("5m", ["/ES", "TSLA", "MU", "SNDK"], source="demo")
+    assert not errs and {r.ticker for r in rows} == {"/ES", "TSLA", "MU", "SNDK"}
+    es = next(r for r in rows if r.ticker == "/ES")
+    assert es.per_point == 50.0 and es.micro == "/MES"

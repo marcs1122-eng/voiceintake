@@ -12,7 +12,7 @@ import streamlit as st
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from scanner.scan import ScanConfig, dedupe_csps, rank_dips, run_scan
+from scanner.scan import ScanConfig, dedupe_csps, dedupe_spreads, rank_dips, run_scan
 from scanner.universe import DEFAULT_UNIVERSE, Symbol, filter_universe, select_by_tags
 
 st.set_page_config(page_title="Options Income Scanner", page_icon="🎯", layout="wide")
@@ -252,7 +252,7 @@ _tags = {s.ticker: s.tags for s in universe} if have_result else {}
 _tags_all = {s.ticker: s.tags for s in DEFAULT_UNIVERSE}   # sector lookup for held names too
 import datetime as _dt  # noqa: E402
 import html as _html  # noqa: E402
-from scanner.scan import score_bwb, score_condor, score_csp  # noqa: E402
+from scanner.scan import score_bwb, score_condor, score_csp, score_spread  # noqa: E402
 _cfg = ScanConfig()
 _TOP_N = int(_p.get("top_n") or 10)
 
@@ -269,6 +269,12 @@ TAB_HELP = {
     "csp": ("📉 Puts / Wheel", "Cash- or margin-secured puts that passed your filters. Cards = plain "
             "English on the best strike per name. Table = every column and every strike. Score blends "
             "yield, probability, IV Rank, expected-move cushion and the technicals."),
+    "spr": ("📐 Credit Spreads", "Defined-risk premium sales from the same scan. Put credit "
+            "spread = sell a 0.20-0.30 delta put, buy one about 2.5% lower; the bullish/neutral "
+            "trade, best on oversold names. Call credit spread = sell a 0.20-0.30 delta call, buy "
+            "one about 2.5% higher; the bearish trade, best on overbought names, and the only way "
+            "this app ever sells a call. Kept only if the credit is at least a quarter of the "
+            "width. Score = credit vs width, P(OTM), IV Rank, liquidity, chart alignment."),
     "ic": ("🦅 Iron Condors", "Defined risk on both sides: a short put spread and a short call spread "
            "placed around the expected move. Best when IV Rank is high and the chart is range-bound."),
     "bwb": ("🦋 Broken Wing Flies", "A butterfly with one wing wider so it goes on for a small credit "
@@ -314,6 +320,39 @@ def _card_html(c, score: float, at_low: bool = False, extra: str = "") -> str:
             f'<div><b>&#36;{c.capital:,.0f}</b><small>{basis} tied up</small></div>'
             f'</div><div class="pc-chips">{"".join(chips)}</div>'
             f'<div class="pc-why">why now: {why} · {c.dte} DTE · exp {c.expiry:%m/%d/%Y}</div></div>')
+
+
+def _spread_card_html(x, score: float) -> str:
+    cls = "hi" if score >= 80 else ("mid" if score >= 70 else "")
+    side_txt = "put credit spread" if x.side == "put" else "call credit spread"
+    lean = "bullish / neutral" if x.side == "put" else "bearish / neutral"
+    verdict = (f"Sell the {x.ticker} {x.legs}, {x.expiry:%b %d} — collect &#36;{x.credit_dollars:,.0f} "
+               f"on &#36;{x.max_loss_dollars:,.0f} of risk, keep it about {x.prob_otm_pct:.0f}% of the time.")
+    chips = [f'<span class="chip">{lean}</span>',
+             f'<span class="chip {"on" if x.credit_to_width >= 0.33 else "warn"}">{x.credit_to_width * 100:.0f}% of width</span>']
+    if x.iv_rank is not None:
+        k = "on" if x.iv_rank >= 30 else ("warn" if x.iv_rank >= 20 else "bad")
+        chips.append(f'<span class="chip {k}">IVR {x.iv_rank:.0f}</span>')
+    chips.append(f'<span class="chip {"on" if (x.side == "put" and x.rsi_14 <= 30) or (x.side == "call" and x.rsi_14 >= 70) else ""}">RSI {x.rsi_14:.0f}</span>')
+    if x.side == "call" and x.at_upper:
+        chips.append('<span class="chip on">at upper band</span>')
+    for sgn in sorted(x.entry_signals):
+        if x.side == "put":
+            chips.append(f'<span class="chip on">{_html.escape(sgn)}</span>')
+    if x.earnings_before_expiry:
+        chips.append('<span class="chip bad">earnings before expiry</span>')
+    return (f'<div class="pcard {cls}"><div class="pc-head"><span class="pc-tk">{_html.escape(x.ticker)}</span>'
+            f'<span class="pc-verdict">{verdict}</span><span class="pc-score">{score:g}</span></div>'
+            f'<div class="pc-stats">'
+            f'<div><b>&#36;{x.credit_dollars:,.0f}</b><small>credit</small></div>'
+            f'<div><b>&#36;{x.max_loss_dollars:,.0f}</b><small>max loss</small></div>'
+            f'<div><b>{x.roc_pct:.0f}%</b><small>return on risk</small></div>'
+            f'<div><b>{x.prob_otm_pct:.0f}%</b><small>keeps the credit</small></div>'
+            f'<div><b>{x.breakeven:,.2f}</b><small>breakeven</small></div>'
+            f'<div><b>{x.short_delta:.2f}</b><small>short delta</small></div>'
+            f'</div><div class="pc-chips">{"".join(chips)}</div>'
+            f'<div class="pc-why">{side_txt} · width {x.width:g} · {x.dte} DTE · exp {x.expiry:%m/%d/%Y} · '
+            f'min OI {x.min_open_interest:,}</div></div>')
 
 
 def _tab_head(key: str) -> None:
@@ -452,10 +491,11 @@ if have_result:
     with st.expander("🖨️ Print today's plan", expanded=False):
         _print_block("top")
 
-(tab_plan, tab_bounce, tab_csp, tab_ic, tab_bwb, tab_dip, tab_scalp, tab_news, tab_score,
- tab_pos, tab_corr) = st.tabs(
-    ["📋 Trade Plan", "🏀 Bounce", "📉 Puts / Wheel", "🦅 Iron Condors", "🦋 Broken Wing Flies",
-     "🔻 Quality Dips", "⚡ Scalp", "📰 News", "📈 Scorecard", "💼 Positions", "🔗 Correlation"])
+(tab_plan, tab_bounce, tab_csp, tab_spr, tab_ic, tab_bwb, tab_dip, tab_scalp, tab_news,
+ tab_score, tab_pos, tab_corr) = st.tabs(
+    ["📋 Trade Plan", "🏀 Bounce", "📉 Puts / Wheel", "📐 Credit Spreads", "🦅 Iron Condors",
+     "🦋 Broken Wing Flies", "🔻 Quality Dips", "⚡ Scalp", "📰 News", "📈 Scorecard",
+     "💼 Positions", "🔗 Correlation"])
 
 
 def _grade_cell(g: dict | None) -> str:
@@ -792,6 +832,49 @@ with tab_csp:
             })
             st.download_button("Download CSV", df.to_csv(index=False), "csps.csv")
 
+with tab_spr:
+    _tab_head("spr")
+    if not have_result:
+        st.info(NEED_SCAN)
+    elif not result.spreads:
+        st.write("No credit spreads paid at least a quarter of their width at these filters.")
+    else:
+        _sd = st.radio("Side", ["Both", "📉 Put credit spreads (bullish)", "📈 Call credit spreads (bearish)"],
+                       horizontal=True, label_visibility="collapsed", key="spr_side")
+        _sv = st.radio("View", ["Cards", "Table"], horizontal=True, label_visibility="collapsed", key="spr_view")
+        _want = {"📉": "put", "📈": "call"}.get(_sd[:1])
+        _sp = [x for x in result.spreads if _want is None or x.side == _want]
+        _best = dedupe_spreads(_sp)
+        st.caption(f"{len(_sp)} spreads passed · {len(_best)} names · ranked by score. "
+                   "Put spreads want the name oversold; call spreads want it overbought. "
+                   "A call credit spread is the only way this app sells a call.")
+        if _sv == "Cards":
+            for x in _best[:_TOP_N]:
+                st.markdown(_spread_card_html(x, score_spread(x, _tags.get(x.ticker, frozenset()), _cfg)),
+                            unsafe_allow_html=True)
+        else:
+            _all = st.toggle("Show every expiry", value=False, key="spr_all",
+                             help="Off = best spread per name and side. On = every expiry that passed.")
+            _rows = _sp if _all else _best
+            _sdf = pd.DataFrame([{
+                "Score": score_spread(x, _tags.get(x.ticker, frozenset()), _cfg),
+                "Ticker": x.ticker, "Side": "put" if x.side == "put" else "call",
+                "Spot": x.spot, "Legs": x.legs, "Expiry": x.expiry.strftime("%m/%d/%Y"), "DTE": x.dte,
+                "Credit $": x.credit_dollars, "Max loss $": x.max_loss_dollars,
+                "Credit/width %": x.credit_to_width * 100, "ROR %": min(x.roc_pct, 999),
+                "Annualized %": min(x.annualized_pct, 9999), "P(OTM) %": x.prob_otm_pct,
+                "Breakeven": x.breakeven, "Short Δ": x.short_delta, "IVR": x.iv_rank,
+                "RSI": x.rsi_14, "Min OI": x.min_open_interest, "Earnings⚠": x.earnings_before_expiry,
+            } for x in _rows])
+            _n = st.column_config.NumberColumn
+            st.dataframe(_sdf, use_container_width=True, hide_index=True, column_config={
+                "Score": _n(format="%d"), "Spot": _n(format="%.2f"), "Credit $": _n(format="$%d"),
+                "Max loss $": _n(format="$%d"), "Credit/width %": _n(format="%.0f%%"),
+                "ROR %": _n(format="%.0f%%"), "Annualized %": _n(format="%.0f%%"),
+                "P(OTM) %": _n(format="%.0f%%"), "Breakeven": _n(format="%.2f"),
+                "Short Δ": _n(format="%.2f"), "IVR": _n(format="%.0f"), "RSI": _n(format="%.0f")})
+            st.download_button("Download CSV", _sdf.to_csv(index=False), "credit_spreads.csv", key="spr_csv")
+
 with tab_ic:
     _tab_head("ic")
     if not have_result:
@@ -860,15 +943,16 @@ with tab_dip:
 
 with tab_scalp:
     _tab_head("scalp")
-    from scanner.scalp import SCALP_FUTURES, run_scalp_scan
-    st.caption("Quick day-trade radar on the deepest futures — runs on its own, "
-               "no option chains. LONG/SHORT SCALP = 2 of 3: RSI extreme, "
-               "outside the 2σ band, at the session low/high. Signals, not "
-               "orders — confirm on the tasty DOM before entering.")
+    from scanner.scalp import SCALP_ALL, SCALP_DEFAULT, run_scalp_scan
+    st.caption("Quick day-trade radar on the deepest futures plus the most liquid stocks "
+               "and ETFs — runs on its own, no option chains. LONG/SHORT SCALP = 2 of 3: "
+               "RSI extreme, outside the 2σ band, at the session low/high. Equity risk is "
+               "quoted per 100 shares (one contract). Semis are scalp-only by your rules. "
+               "Signals, not orders — confirm on the tasty DOM before entering.")
     c1, c2, c3 = st.columns([1, 2, 1])
     scalp_tf = c1.selectbox("Timeframe", ["5m", "10m", "1h"], index=0, key="scalp_tf")
-    scalp_syms = c2.multiselect("Products", SCALP_FUTURES, default=SCALP_FUTURES,
-                                key="scalp_syms")
+    scalp_syms = c2.multiselect("Products", SCALP_ALL, default=SCALP_DEFAULT, key="scalp_syms",
+                                help="Futures first, then the liquid names. Add or drop any.")
     scalp_go = c3.button("⚡ Run scalp scan", type="primary", use_container_width=True)
 
     if scalp_go:
@@ -906,8 +990,8 @@ with tab_scalp:
                         f"{icon} **{r.ticker} {r.bias}** — {r.spot:g}, "
                         f"{' + '.join(sorted(r.signals))} · stop {r.stop:,.2f} · "
                         f"target {r.target:,.2f} (20-bar mean) · "
-                        f"risk \\${r.risk_dollars:,.0f}/ct, reward \\${r.reward_dollars:,.0f}/ct "
-                        f"(size down with {r.micro})")
+                        f"risk {r.risk_dollars:,.0f}/ct, reward {r.reward_dollars:,.0f}/ct"
+                        + (f" (size down with {r.micro})" if r.micro else " (per 100 shares)"))
             else:
                 st.write("**Nothing stretched right now** — no product is 2-of-3. "
                          "That's the answer: don't force a scalp in the middle of the range.")

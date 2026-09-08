@@ -6,8 +6,8 @@ import datetime as dt
 from dataclasses import dataclass, field
 
 from .data import DataProvider, UnderlyingInfo
-from .strategies import (BrokenWingButterfly, CashSecuredPut, IronCondor,
-                         build_bwb, build_csps, build_iron_condor)
+from .strategies import (BrokenWingButterfly, CashSecuredPut, CreditSpread, IronCondor,
+                         build_bwb, build_credit_spreads, build_csps, build_iron_condor)
 from .universe import Symbol
 
 
@@ -29,6 +29,10 @@ class ScanConfig:
     condor_short_delta: float = 0.16
     condor_width_pct: float = 0.02
     bwb_body_delta: float = 0.30
+    spread_delta_lo: float = 0.20          # credit spreads: short strike delta band
+    spread_delta_hi: float = 0.30
+    spread_width_pct: float = 0.025        # long strike at least this far (of spot) past the short
+    spread_min_credit_to_width: float = 0.25   # drop spreads paying under a quarter of the width
     max_workers: int = 8
 
 
@@ -38,6 +42,7 @@ class ScanResult:
     csps: list[CashSecuredPut] = field(default_factory=list)
     condors: list[IronCondor] = field(default_factory=list)
     bwbs: list[BrokenWingButterfly] = field(default_factory=list)
+    spreads: list[CreditSpread] = field(default_factory=list)
     errors: dict[str, str] = field(default_factory=dict)
 
 
@@ -105,6 +110,13 @@ def _scan_one(provider: DataProvider, ticker: str, cfg: ScanConfig) -> ScanResul
             earnings_before_expiry=earn)
         if fly:
             part.bwbs.append(fly)
+        part.spreads.extend(build_credit_spreads(
+            chain, delta_range=(cfg.spread_delta_lo, cfg.spread_delta_hi),
+            width_pct=cfg.spread_width_pct, min_open_interest=cfg.min_open_interest,
+            earnings_before_expiry=earn, iv_rank=info.iv_rank, rsi_14=info.rsi_14,
+            entry_signals=info.entry_signals,
+            at_upper=bool(info.boll_upper and info.spot >= info.boll_upper * 0.98),
+            dividend_yield=info.dividend_yield))
     return part
 
 
@@ -147,6 +159,7 @@ def run_scan(provider: DataProvider, universe: list[Symbol],
         result.csps.extend(p.csps)
         result.condors.extend(p.condors)
         result.bwbs.extend(p.bwbs)
+        result.spreads.extend(p.spreads)
 
     if cfg.max_capital is not None:
         result.csps = [c for c in result.csps if c.capital <= cfg.max_capital]
@@ -161,6 +174,8 @@ def run_scan(provider: DataProvider, universe: list[Symbol],
 
     result.csps.sort(key=lambda c: score_csp(c, tags.get(c.ticker, frozenset()), cfg), reverse=True)
     result.condors.sort(key=lambda c: score_condor(c, cfg), reverse=True)
+    result.spreads = [x for x in result.spreads if x.credit_to_width >= cfg.spread_min_credit_to_width]
+    result.spreads.sort(key=lambda x: score_spread(x, tags.get(x.ticker, frozenset()), cfg), reverse=True)
     result.bwbs.sort(key=lambda b: score_bwb(b, cfg), reverse=True)
     return result
 
@@ -227,6 +242,45 @@ def score_condor(c: IronCondor, cfg: ScanConfig) -> float:
     if c.earnings_before_expiry and cfg.avoid_earnings:
         score -= 20.0
     return round(max(score, 0.0), 1)
+
+
+def score_spread(x: CreditSpread, tags: frozenset, cfg: ScanConfig) -> float:
+    """Credit spreads: paid enough for the width, likely to expire OTM, liquid,
+    with the chart leaning the right way (oversold for put spreads, overbought
+    for call spreads) and IV Rank on your side."""
+    rr = min(x.credit_to_width / 0.5, 1.0) * 35.0        # a third of the width is 23 pts; half is max
+    pop = (min(x.prob_otm_pct, 100.0) / 100.0) * 35.0
+    liquidity = min(x.min_open_interest / 1000.0, 1.0) * 10.0
+    score = rr + pop + liquidity
+    if x.iv_rank is not None:
+        score += (x.iv_rank / 100.0) * 10.0
+        if x.iv_rank < 20:
+            score -= 5.0
+    if x.side == "put":
+        if x.rsi_14 <= 30 or "LowerBB" in x.entry_signals:
+            score += 10.0
+        if "50SMA" in x.entry_signals:
+            score += 5.0
+    else:
+        if x.rsi_14 >= 70 or x.at_upper:
+            score += 10.0
+    if tags & {"blue-chip", "etf"}:
+        score += 5.0
+    if x.earnings_before_expiry and cfg.avoid_earnings:
+        score -= 20.0
+    return round(max(score, 0.0), 1)
+
+
+def dedupe_spreads(spreads: list[CreditSpread]) -> list[CreditSpread]:
+    """Best-ranked spread per (ticker, side). Input must already be sorted."""
+    seen, out = set(), []
+    for x in spreads:
+        k = (x.ticker, x.side)
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append(x)
+    return out
 
 
 def score_bwb(b: BrokenWingButterfly, cfg: ScanConfig) -> float:
