@@ -1248,3 +1248,12 @@ def test_movers_rotation_list():
     _, wi2 = movers.top_movers(Q(), ["A"], tags={})
     assert wi2[0].yday_pct == pytest.approx(5.56, abs=0.01) and wi2[0].today_pct is None and wi2[0].follow_through == ""
     assert isinstance(movers.sector_story(lo, wi), str)
+
+
+def test_held_names_file(tmp_path):
+    from scanner import present
+    f = tmp_path / "held.txt"
+    f.write_text("# comment\nclx\nTTWO  # note\n\n/ZN\nCLX\n")
+    assert present.held_names(str(f)) == ["CLX", "TTWO", "/ZN"]
+    assert present.held_names(str(tmp_path / "missing.txt")) == []
+    assert "CLX" in present.held_names()          # the repo file

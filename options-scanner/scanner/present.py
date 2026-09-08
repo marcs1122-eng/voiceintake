@@ -183,3 +183,19 @@ def brief_from_result(result, tags: dict, picks: list[tuple[float, CashSecuredPu
                   "before entering. Exit plan: 25% of max day one, 30% day two, then "
                   "50% or 21 DTE.",
     }
+
+
+def held_names(path: str | None = None) -> list[str]:
+    """Tickers in data/held.txt (one per line, # comments). Used when the broker
+    is not connected so a brief never pitches a fresh entry on a name already held."""
+    import os
+    path = path or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "held.txt")
+    try:
+        out = []
+        for line in open(path):
+            t = line.split("#")[0].strip().upper()
+            if t and t not in out:
+                out.append(t)
+        return out
+    except OSError:
+        return []

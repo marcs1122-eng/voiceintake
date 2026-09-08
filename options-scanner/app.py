@@ -359,11 +359,15 @@ def _plan_ctx() -> dict:
             ctx["checks"] = _rules.check(rows, _tags_all, ctx["bal"], ctx["bd"])
         except Exception as exc:
             ctx["errors"].append(f"positions: {exc}")
+    if not ctx["held"]:                       # broker not connected → the hand-kept list
+        ctx["held"] = _present.held_names()
     if have_result:
         seen, picks = set(), []
         for c in result.csps:
             sc = score_csp(c, _tags.get(c.ticker, frozenset()), _cfg)
             if c.ticker in seen or sc < 70 or c.prob_otm_pct < 65:
+                continue
+            if c.ticker in ctx["held"]:       # already in the book → manage it, don't pitch it
                 continue
             seen.add(c.ticker)
             picks.append((sc, c))
