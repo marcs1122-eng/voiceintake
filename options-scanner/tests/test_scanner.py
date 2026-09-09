@@ -729,7 +729,7 @@ def test_picks_from_brief_parses_strike_zones():
     ]}
     picks = track.picks_from_brief(brief, today=dt.date(2026, 9, 2))
     got = {p.ticker: p.strike for p in picks}
-    assert got == {"TJX": 125.0, "ODFL": 174.5, "CMI": 505.0}
+    assert got == {"TJX": 125.0, "ODFL": 174.5, "CMI": 515.0}  # spread logs the short strike
     assert picks[0].signals == ["a", "b"] and picks[0].source == "brief"
     assert picks[0].expiry == "2026-10-17"
 
