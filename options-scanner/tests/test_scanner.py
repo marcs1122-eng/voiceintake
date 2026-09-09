@@ -1311,3 +1311,19 @@ def test_scalp_equities_run():
     assert not errs and {r.ticker for r in rows} == {"/ES", "TSLA", "MU", "SNDK"}
     es = next(r for r in rows if r.ticker == "/ES")
     assert es.per_point == 50.0 and es.micro == "/MES"
+
+
+def test_brief_zone_parser_reads_dated_strikes():
+    import datetime as dt
+    from scanner import track
+    brief = {"candidates": [
+        {"ticker": "MAR", "spot": "328.58", "rsi": "29.0",
+         "zone": "Oct 16 310P · 0.24 delta · ~4.40", "signals": "a · b"},
+        {"ticker": "TJX", "spot": "133.27", "rsi": "21.1", "zone": "125P area"},
+        {"ticker": "HD", "spot": "400", "rsi": "30", "zone": "Sell 372-377P"},
+    ]}
+    picks = track.picks_from_brief(brief, dt.date(2026, 9, 9))
+    assert [p.strike for p in picks] == [310.0, 125.0, 374.5]
+    assert picks[0].expiry == "2026-10-16" and picks[0].dte == 37
+    assert picks[0].delta == 0.24 and picks[0].mid == 4.4
+    assert picks[1].expiry == "2026-10-24"  # nominal 45 days when no date

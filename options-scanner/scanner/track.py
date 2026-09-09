@@ -146,28 +146,69 @@ def picks_from_scan(result, tags: dict, top_n: int = 5, min_score: float = 70.0,
 
 def picks_from_brief(brief: dict, today: dt.date | None = None) -> list[Pick]:
     """A morning-brief JSON (the brief_pdf schema) has ticker/spot/rsi and a
-    strike zone like "Sell 125P" or "172-177P"; we log the named strike (or
-    the midpoint of a range) with a nominal 45-day expiry so the pick can
-    still be graded on direction and drawdown."""
+    strike zone like "Sell 125P", "172-177P" or
+    "Oct 16 310P · 0.24 delta · ~4.40". We log the strike that carries the
+    P suffix (midpoint of a range), the named expiry when the zone has one
+    (else a nominal 45 days), plus the delta and mid when they are there,
+    so the pick can be graded on direction and drawdown."""
     import re
     today = today or dt.date.today()
     out = []
     for c in brief.get("candidates", []):
         zone = str(c.get("zone", ""))
-        nums = [float(x) for x in re.findall(r"\d+(?:\.\d+)?", zone)]
-        if not nums or not c.get("spot"):
+        strike = _zone_strike(zone)
+        if strike is None or not c.get("spot"):
             continue
-        strike = sum(nums[:2]) / len(nums[:2])
+        expiry = _zone_expiry(zone, today) or today + dt.timedelta(days=45)
+        m = re.search(r"(0\.\d+)\s*delta", zone)
+        delta = float(m.group(1)) if m else 0.0
+        m = re.search(r"~\s*(\d+(?:\.\d+)?)", zone)
+        mid = float(m.group(1)) if m else 0.0
         spot = float(str(c["spot"]).replace(",", ""))
         rsi = float(c["rsi"]) if c.get("rsi") not in (None, "") else None
         out.append(Pick(
             picked_on=today.isoformat(), ticker=str(c["ticker"]).upper(),
             strategy="short put", strike=strike,
-            expiry=(today + dt.timedelta(days=45)).isoformat(), dte=45,
-            spot=spot, mid=0.0, rsi=rsi,
+            expiry=expiry.isoformat(), dte=(expiry - today).days,
+            spot=spot, mid=mid, delta=delta, rsi=rsi,
             signals=[s.strip() for s in str(c.get("signals", "")).split("·") if s.strip()],
             source="brief"))
     return out
+
+
+def _zone_strike(zone: str) -> float | None:
+    """"310P" -> 310; "172-177P" -> 174.5; "Sell 125P area" -> 125.
+    Only numbers that carry the P suffix count, so "Oct 16 310P" is 310,
+    not the average of 16 and 310."""
+    import re
+    m = re.search(r"(\d+(?:\.\d+)?)\s*(?:-|/|to)\s*(\d+(?:\.\d+)?)\s*P\b", zone)
+    if m:
+        return (float(m.group(1)) + float(m.group(2))) / 2
+    m = re.search(r"(\d+(?:\.\d+)?)\s*P\b", zone)
+    if m:
+        return float(m.group(1))
+    nums = [float(x) for x in re.findall(r"\d+(?:\.\d+)?", zone)]
+    return nums[0] if nums else None
+
+
+_MONTHS = {m: i for i, m in enumerate(
+    ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], 1)}
+
+
+def _zone_expiry(zone: str, today: dt.date) -> dt.date | None:
+    """"Oct 16 310P" -> the next Oct 16 on or after today."""
+    import re
+    m = re.search(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})\b", zone, re.I)
+    if not m:
+        return None
+    month, day = _MONTHS[m.group(1).lower()[:3]], int(m.group(2))
+    try:
+        d = dt.date(today.year, month, day)
+    except ValueError:
+        return None
+    if d < today:
+        d = dt.date(today.year + 1, month, day)
+    return d
 
 
 # ---------------------------------------------------------------------------
