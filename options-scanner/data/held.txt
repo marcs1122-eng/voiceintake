@@ -1,0 +1,45 @@
+# Names Mac currently holds (short premium unless noted). One ticker per line.
+# The routines read this: anything here is a MANAGE line in the brief, never a
+# fresh entry. Update it when positions change — the cloud session has no
+# tastytrade credentials and cannot see the account.
+# Last confirmed: 2026-09-10 (from Mac's tastytrade transaction export)
+# CONFIRM: TTWO and PM each had 2 contracts bought to close on 9/10 -- if that
+# was the whole position, delete those two lines.
+CLX
+TTWO
+TLT
+ORCL
+SNDK
+MU
+WDC
+QQQ
+QQQI
+SPY
+SPX
+RSP
+IWM
+CMI
+ARM
+AMZN
+DDOG
+GOOGL
+META
+INTC
+IONQ
+OKLO
+UNH
+T
+XLP
+EWZ
+UVXY
+PM
+NFLX
+/GC
+/CL
+/NG
+/6E
+/ZN
+/NQ
+NVDA
+HD
+NBIS

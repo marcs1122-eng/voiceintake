@@ -1,0 +1,3 @@
+# Python deps for Streamlit Community Cloud (deploys options-scanner/app.py);
+# the Next.js app ignores this file.
+-r options-scanner/requirements.txt
