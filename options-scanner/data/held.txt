@@ -2,7 +2,9 @@
 # The routines read this: anything here is a MANAGE line in the brief, never a
 # fresh entry. Update it when positions change — the cloud session has no
 # tastytrade credentials and cannot see the account.
-# Last confirmed: 2026-09-08 (from Mac + the 9/02 correlation matrix)
+# Last confirmed: 2026-09-10 (from Mac's tastytrade transaction export)
+# CONFIRM: TTWO and PM each had 2 contracts bought to close on 9/10 -- if that
+# was the whole position, delete those two lines.
 CLX
 TTWO
 TLT
@@ -38,3 +40,6 @@ NFLX
 /6E
 /ZN
 /NQ
+NVDA
+HD
+NBIS
