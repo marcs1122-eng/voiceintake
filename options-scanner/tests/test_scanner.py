@@ -1327,3 +1327,30 @@ def test_brief_zone_parser_reads_dated_strikes():
     assert picks[0].expiry == "2026-10-16" and picks[0].dte == 37
     assert picks[0].delta == 0.24 and picks[0].mid == 4.4
     assert picks[1].expiry == "2026-10-24"  # nominal 45 days when no date
+
+
+def test_brief_simple_caps_trades_and_marks_status():
+    import importlib.util, pathlib
+    spec = importlib.util.spec_from_file_location(
+        "brief_simple", pathlib.Path(__file__).parent.parent / "tools" / "brief_simple.py")
+    bs = importlib.util.module_from_spec(spec); spec.loader.exec_module(bs)
+    b = {"date": "Monday 09/14/2026", "headline": "one thing",
+         "trades": [{"ticker": f"T{i}", "action": "sell", "size": "1"} for i in range(5)],
+         "positions": [{"ticker": "/CL", "status": "AT RISK", "action": "close it"},
+                       {"ticker": "TLT", "status": "OK", "action": "fine"}],
+         "market": ["a", "b", "c", "d"], "skip": "nothing"}
+    h = bs.build_html(b, "")
+    assert h.count('class="tkr"') == 3          # capped at 3 trades
+    assert h.count("<li>") - h.count('class="badge') >= 0
+    assert 'class="badge risk"' in h and 'class="badge ok"' in h
+    assert h.count('class="mkt"') == 1 and "<li>d</li>" not in h   # market capped at 3
+    assert bs.slugify(b) == "morning-brief-monday-09-14-2026"
+
+
+def test_brief_simple_handles_no_trades():
+    import importlib.util, pathlib
+    spec = importlib.util.spec_from_file_location(
+        "brief_simple", pathlib.Path(__file__).parent.parent / "tools" / "brief_simple.py")
+    bs = importlib.util.module_from_spec(spec); spec.loader.exec_module(bs)
+    h = bs.build_html({"date": "Tue", "headline": "quiet"}, "")
+    assert "Nothing qualified today" in h
