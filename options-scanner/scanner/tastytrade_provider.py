@@ -232,6 +232,9 @@ class TastytradeProvider(DataProvider):
         # daily bars still come from Yahoo; the streamer only backfills days
         return self._yahoo().history_lows(ticker, since)
 
+    def history_highs(self, ticker: str, since: dt.date) -> float | None:
+        return self._yahoo().history_highs(ticker, since)
+
     def daily_bars(self, ticker: str, n: int = 260) -> list[tuple[float, float]]:
         return self._yahoo().daily_bars(ticker, n)
 

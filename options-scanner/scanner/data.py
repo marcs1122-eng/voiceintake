@@ -133,7 +133,12 @@ class DataProvider:
 
     def history_lows(self, ticker: str, since: dt.date) -> float | None:
         """Lowest trade since `since` (inclusive) — used by the track record
-        to tell whether a short strike was ever tested. None if unknown."""
+        to tell whether a short PUT strike was ever tested. None if unknown."""
+        return None
+
+    def history_highs(self, ticker: str, since: dt.date) -> float | None:
+        """Highest trade since `since` (inclusive) — the call-side mirror of
+        history_lows, for grading fades. None if unknown."""
         return None
 
     def daily_bars(self, ticker: str, n: int = 260) -> list[tuple[float, float]]:
@@ -313,11 +318,18 @@ class YFinanceProvider(DataProvider):
         return info
 
     def history_lows(self, ticker: str, since: dt.date) -> float | None:
+        return self._history_extreme(ticker, since, "Low")
+
+    def history_highs(self, ticker: str, since: dt.date) -> float | None:
+        return self._history_extreme(ticker, since, "High")
+
+    def _history_extreme(self, ticker: str, since: dt.date, column: str) -> float | None:
         try:
             hist = self._ticker(ticker).history(start=since.isoformat(), auto_adjust=True)
-            if hist.empty or "Low" not in hist.columns:
+            if hist.empty or column not in hist.columns:
                 return None
-            return float(hist["Low"].min())
+            series = hist[column]
+            return float(series.min() if column == "Low" else series.max())
         except Exception:
             return None
 
@@ -469,6 +481,11 @@ class SyntheticProvider(DataProvider):
         # seeded per ticker so tests are repeatable
         spot, _ = self._spot_iv(ticker)
         return round(spot * (1.0 - self._rng(ticker + ":low").uniform(0.03, 0.09)), 2)
+
+    def history_highs(self, ticker: str, since: dt.date) -> float | None:
+        # the mirror of history_lows: 3-9% above spot, separately seeded
+        spot, _ = self._spot_iv(ticker)
+        return round(spot * (1.0 + self._rng(ticker + ":high").uniform(0.03, 0.09)), 2)
 
     def chain(self, ticker: str, expiry: dt.date) -> ChainSnapshot:
         rng = self._rng(ticker)

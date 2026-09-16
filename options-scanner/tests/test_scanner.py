@@ -710,11 +710,11 @@ def test_track_grade_math():
     p = track.Pick(picked_on="2026-09-01", ticker="X", strategy="short put",
                    strike=90.0, expiry="2026-10-16", dte=45, spot=100.0,
                    mid=2.0, iv=0.30, delta=-0.2)
-    up = track.grade_one(p, "7", spot_now=105.0, low_since=99.0, on=dt.date(2026, 9, 8))
+    up = track.grade_one(p, "7", spot_now=105.0, extreme_since=99.0, on=dt.date(2026, 9, 8))
     assert up["otm"] and not up["tested"] and up["pct_of_max"] > 0
-    down = track.grade_one(p, "7", spot_now=85.0, low_since=84.0, on=dt.date(2026, 9, 8))
+    down = track.grade_one(p, "7", spot_now=85.0, extreme_since=84.0, on=dt.date(2026, 9, 8))
     assert not down["otm"] and down["tested"] and down["pct_of_max"] < 0
-    at_exp = track.grade_one(p, "expiry", spot_now=95.0, low_since=91.0, on=dt.date(2026, 10, 16))
+    at_exp = track.grade_one(p, "expiry", spot_now=95.0, extreme_since=91.0, on=dt.date(2026, 10, 16))
     assert at_exp["pct_of_max"] == 100.0 and at_exp["hit_50"]       # expired worthless
 
 
@@ -1354,3 +1354,123 @@ def test_brief_simple_handles_no_trades():
     bs = importlib.util.module_from_spec(spec); spec.loader.exec_module(bs)
     h = bs.build_html({"date": "Tue", "headline": "quiet"}, "")
     assert "Nothing qualified today" in h
+
+
+def test_brief_zone_parser_reads_call_strikes():
+    """The fade side logs the SHORT call strike, and a call zone must not be
+    mistaken for a put — otherwise a call spread lands in the ledger graded
+    backwards."""
+    from scanner import track
+    import datetime as dt
+
+    assert track._zone_strike_kind("Oct 16 230C / 240C spread") == (230.0, "call")
+    assert track._zone_strike_kind("225-230C") == (227.5, "call")
+    assert track._zone_strike_kind("Oct 16 310P") == (310.0, "put")
+    assert track._zone_strike_kind("515P / 495P spread") == (515.0, "put")
+    # an untagged zone stays a put — every zone written before calls existed was one
+    assert track._zone_strike_kind("125 area") == (125.0, "put")
+
+    brief = {"candidates": [
+        {"ticker": "CVX", "spot": "217.77", "rsi": "70.6",
+         "zone": "Oct 16 230C / 240C spread · 0.28 delta · ~1.75",
+         "signals": "52-week high · at its upper band"},
+        {"ticker": "USFD", "spot": "92.01", "rsi": "22.9",
+         "zone": "Oct 16 85P ~ 1.05"},
+    ]}
+    picks = track.picks_from_brief(brief, today=dt.date(2026, 9, 16))
+    by = {p.ticker: p for p in picks}
+    assert by["CVX"].strategy == "short call"
+    assert by["CVX"].strike == 230.0
+    assert by["CVX"].expiry == "2026-10-16"
+    assert by["CVX"].delta == 0.28
+    assert by["USFD"].strategy == "short put"
+    assert by["USFD"].strike == 85.0
+
+
+def test_track_grades_short_calls_the_other_way_round():
+    """A short call is OTM BELOW its strike and tested by the high, not the
+    low — the mirror of the put logic."""
+    from scanner import track
+    import datetime as dt
+
+    call = track.Pick(picked_on="2026-09-16", ticker="CVX", strategy="short call",
+                      strike=230.0, expiry="2026-10-16", dte=30, spot=217.77,
+                      mid=1.75, iv=0.29, delta=0.28)
+
+    safe = track.grade_one(call, "7", spot_now=210.0, extreme_since=222.0,
+                           on=dt.date(2026, 9, 23))
+    assert safe["otm"] is True            # below the strike is OTM for a call
+    assert safe["tested"] is False        # the high never reached 230
+    assert safe["high_since"] == 222.0    # calls record the high, not the low
+    assert "low_since" not in safe
+
+    blown = track.grade_one(call, "7", spot_now=235.0, extreme_since=236.0,
+                            on=dt.date(2026, 9, 23))
+    assert blown["otm"] is False
+    assert blown["tested"] is True
+    assert blown["pct_of_max"] < 0       # through the strike: giving back credit
+
+    # a put at the same numbers grades the opposite way
+    put = track.Pick(picked_on="2026-09-16", ticker="X", strategy="short put",
+                     strike=230.0, expiry="2026-10-16", dte=30, spot=240.0,
+                     mid=1.75, iv=0.29, delta=-0.28)
+    assert track.grade_one(put, "7", spot_now=210.0, extreme_since=209.0,
+                           on=dt.date(2026, 9, 23))["otm"] is False
+
+
+def test_grade_with_quotes_reads_high_for_calls():
+    """The scheduled routines hand grading a quotes dict; a call pick must
+    read high_since from it, so a fade cannot be silently left ungraded."""
+    from scanner import track
+    import datetime as dt
+
+    picks = [
+        track.Pick(picked_on="2026-09-16", ticker="CVX", strategy="short call",
+                   strike=230.0, expiry="2026-10-16", dte=30, spot=217.77, mid=1.75),
+        track.Pick(picked_on="2026-09-16", ticker="USFD", strategy="short put",
+                   strike=85.0, expiry="2026-10-16", dte=30, spot=92.01, mid=1.05),
+    ]
+    quotes = {
+        "CVX": {"spot": 233.0, "high_since": 234.0, "low_since": 215.0},
+        "USFD": {"spot": 90.0, "low_since": 84.0, "high_since": 95.0},
+    }
+    added = track.grade_with_quotes(picks, quotes, today=dt.date(2026, 9, 23))
+    assert added == 2
+    assert picks[0].grades["7"]["high_since"] == 234.0
+    assert picks[0].grades["7"]["tested"] is True     # high went through 230
+    assert picks[1].grades["7"]["low_since"] == 84.0
+    assert picks[1].grades["7"]["tested"] is True     # low went through 85
+
+
+def test_scorecard_splits_puts_from_calls():
+    """The bounce side and the fade side have to be scored separately —
+    a blended number would hide a fade side that does not work."""
+    from scanner import track
+    import datetime as dt
+
+    put = track.Pick(picked_on="2026-08-01", ticker="USFD", strategy="short put",
+                     strike=85.0, expiry="2026-09-18", dte=48, spot=92.0, mid=1.05)
+    call = track.Pick(picked_on="2026-08-01", ticker="CVX", strategy="short call",
+                      strike=230.0, expiry="2026-09-18", dte=48, spot=217.8, mid=1.75)
+    quotes = {
+        "USFD": {"spot": 90.0, "low_since": 86.0},    # put held
+        "CVX": {"spot": 235.0, "high_since": 236.0},  # call blew through
+    }
+    track.grade_with_quotes([put, call], quotes, today=dt.date(2026, 8, 31))
+
+    card = track.scorecard([put, call])
+    by = card["by_strategy"]
+    assert by["short put"]["n"] == 1 and by["short put"]["otm_pct"] == 100.0
+    assert by["short call"]["n"] == 1 and by["short call"]["otm_pct"] == 0.0
+
+
+def test_pick_key_separates_a_put_from_a_call():
+    """Same ticker, strike, expiry and date on opposite sides is two picks,
+    not one — otherwise recording the second silently drops it."""
+    from scanner import track
+
+    common = dict(picked_on="2026-09-16", ticker="X", strike=100.0,
+                  expiry="2026-10-16", dte=30, spot=100.0, mid=1.0)
+    put = track.Pick(strategy="short put", **common)
+    call = track.Pick(strategy="short call", **common)
+    assert put.key != call.key

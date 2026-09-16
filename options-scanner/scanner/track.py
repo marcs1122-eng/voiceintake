@@ -37,7 +37,7 @@ HORIZONS = (7, 14, 30)
 class Pick:
     picked_on: str            # ISO date
     ticker: str
-    strategy: str             # "short put" (the only graded strategy for now)
+    strategy: str             # "short put" | "short call"
     strike: float
     expiry: str               # ISO date
     dte: int
@@ -58,7 +58,9 @@ class Pick:
 
     @property
     def key(self) -> tuple:
-        return (self.picked_on, self.ticker, self.strike, self.expiry)
+        # strategy is part of the key: a put and a call can share a ticker,
+        # strike and expiry on the same day and are not the same pick
+        return (self.picked_on, self.ticker, self.strategy, self.strike, self.expiry)
 
     @property
     def premium(self) -> float:
@@ -146,17 +148,18 @@ def picks_from_scan(result, tags: dict, top_n: int = 5, min_score: float = 70.0,
 
 def picks_from_brief(brief: dict, today: dt.date | None = None) -> list[Pick]:
     """A morning-brief JSON (the brief_pdf schema) has ticker/spot/rsi and a
-    strike zone like "Sell 125P", "172-177P" or
-    "Oct 16 310P · 0.24 delta · ~4.40". We log the strike that carries the
-    P suffix (midpoint of a range), the named expiry when the zone has one
-    (else a nominal 45 days), plus the delta and mid when they are there,
-    so the pick can be graded on direction and drawdown."""
+    strike zone like "Sell 125P", "172-177P", "Oct 16 310P · 0.24 delta · ~4.40"
+    or, on the fade side, "Oct 16 230C / 240C spread". We log the strike that
+    carries the P or C suffix (midpoint of a range, the short strike of a
+    spread), the named expiry when the zone has one (else a nominal 45 days),
+    plus the delta and mid when they are there, so the pick can be graded on
+    direction and drawdown."""
     import re
     today = today or dt.date.today()
     out = []
     for c in brief.get("candidates", []):
         zone = str(c.get("zone", ""))
-        strike = _zone_strike(zone)
+        strike, kind = _zone_strike_kind(zone)
         if strike is None or not c.get("spot"):
             continue
         expiry = _zone_expiry(zone, today) or today + dt.timedelta(days=45)
@@ -168,7 +171,7 @@ def picks_from_brief(brief: dict, today: dt.date | None = None) -> list[Pick]:
         rsi = float(c["rsi"]) if c.get("rsi") not in (None, "") else None
         out.append(Pick(
             picked_on=today.isoformat(), ticker=str(c["ticker"]).upper(),
-            strategy="short put", strike=strike,
+            strategy=f"short {kind}", strike=strike,
             expiry=expiry.isoformat(), dte=(expiry - today).days,
             spot=spot, mid=mid, delta=delta, rsi=rsi,
             signals=[s.strip() for s in str(c.get("signals", "")).split("·") if s.strip()],
@@ -176,19 +179,34 @@ def picks_from_brief(brief: dict, today: dt.date | None = None) -> list[Pick]:
     return out
 
 
-def _zone_strike(zone: str) -> float | None:
-    """"310P" -> 310; "172-177P" -> 174.5; "Sell 125P area" -> 125.
-    Only numbers that carry the P suffix count, so "Oct 16 310P" is 310,
-    not the average of 16 and 310."""
+def _zone_strike_kind(zone: str) -> tuple[float | None, str]:
+    """Strike and option kind from a brief's zone string.
+
+    "310P" -> (310, "put"); "172-177P" -> (174.5, "put") — a range is a zone,
+    so we take its midpoint. "515P / 495P spread" -> (515, "put") and
+    "230C / 240C spread" -> (230, "call") — each leg carries its own suffix,
+    so the FIRST one matches and that is the short strike, which is the leg
+    that actually gets tested. Only numbers carrying a P or C count, so
+    "Oct 16 310P" is 310 and not the average of 16 and 310.
+
+    Falls back to (first number, "put") for a bare zone like "125 area",
+    since every untagged zone we have ever written has been a put.
+    """
     import re
-    m = re.search(r"(\d+(?:\.\d+)?)\s*(?:-|/|to)\s*(\d+(?:\.\d+)?)\s*P\b", zone)
-    if m:
-        return (float(m.group(1)) + float(m.group(2))) / 2
-    m = re.search(r"(\d+(?:\.\d+)?)\s*P\b", zone)
-    if m:
-        return float(m.group(1))
+    for suffix, kind in (("P", "put"), ("C", "call")):
+        m = re.search(rf"(\d+(?:\.\d+)?)\s*(?:-|to)\s*(\d+(?:\.\d+)?)\s*{suffix}\b", zone)
+        if m:
+            return (float(m.group(1)) + float(m.group(2))) / 2, kind
+        m = re.search(rf"(\d+(?:\.\d+)?)\s*{suffix}\b", zone)
+        if m:
+            return float(m.group(1)), kind
     nums = [float(x) for x in re.findall(r"\d+(?:\.\d+)?", zone)]
-    return nums[0] if nums else None
+    return (nums[0] if nums else None), "put"
+
+
+def _zone_strike(zone: str) -> float | None:
+    """The strike alone — see _zone_strike_kind."""
+    return _zone_strike_kind(zone)[0]
 
 
 _MONTHS = {m: i for i, m in enumerate(
@@ -215,36 +233,55 @@ def _zone_expiry(zone: str, today: dt.date) -> dt.date | None:
 # grading
 # ---------------------------------------------------------------------------
 
-def grade_one(p: Pick, label: str, spot_now: float, low_since: float | None,
-              on: dt.date) -> dict:
-    """Grade a short put at a point in time.
+def is_call(p: Pick) -> bool:
+    """True for the fade side. Anything not explicitly a call is a put —
+    every pick logged before calls were tracked is a short put."""
+    return "call" in p.strategy.lower()
 
-    otm        — spot is still above the strike
-    tested     — price traded through the strike at some point since the pick
+
+def grade_one(p: Pick, label: str, spot_now: float, extreme_since: float | None,
+              on: dt.date) -> dict:
+    """Grade a short option at a point in time.
+
+    otm        — a put is still OTM above its strike, a call below it
+    tested     — price traded through the strike at some point since the pick.
+                 For a put that is the lowest low since; for a call the
+                 highest high, so `extreme_since` is whichever one applies.
     pct_of_max — share of the original credit the position would show
                  captured if closed now (re-priced with the pick-time IV);
                  this is what the 25/30/50% ladder keys on
+
+    A short call spread is graded on its SHORT leg alone. That overstates
+    the loss once price runs past the long strike, so read pct_of_max on a
+    spread as a floor, not a mark.
     """
+    call = is_call(p)
     exp = dt.date.fromisoformat(p.expiry)
     remaining = max((exp - on).days, 0)
+    intrinsic = (max(spot_now - p.strike, 0.0) if call
+                 else max(p.strike - spot_now, 0.0))
     if p.mid > 0 and p.iv > 0:
         if remaining == 0:
-            mark = max(p.strike - spot_now, 0.0)
+            mark = intrinsic
         else:
+            price = bs.call_price if call else bs.put_price
             try:
-                mark = bs.put_price(spot_now, p.strike, p.iv, remaining / 365.0)
+                mark = price(spot_now, p.strike, p.iv, remaining / 365.0)
             except ValueError:
-                mark = max(p.strike - spot_now, 0.0)
+                mark = intrinsic
         pct_of_max = (1.0 - mark / p.mid) * 100.0
     else:
         pct_of_max = None
+    tested = (extreme_since is not None
+              and (extreme_since >= p.strike if call else extreme_since <= p.strike))
     return {
         "on": on.isoformat(),
         "spot": round(spot_now, 2),
         "move_pct": round((spot_now / p.spot - 1.0) * 100.0, 2) if p.spot else None,
-        "otm": spot_now > p.strike,
-        "low_since": round(low_since, 2) if low_since is not None else None,
-        "tested": (low_since is not None and low_since <= p.strike),
+        "otm": spot_now < p.strike if call else spot_now > p.strike,
+        ("high_since" if call else "low_since"):
+            round(extreme_since, 2) if extreme_since is not None else None,
+        "tested": tested,
         "pct_of_max": round(pct_of_max, 1) if pct_of_max is not None else None,
         "hit_50": (pct_of_max is not None and pct_of_max >= 50.0),
     }
@@ -278,12 +315,12 @@ def due(picks: list[Pick], today: dt.date | None = None) -> dict[str, dict]:
 
 
 def _apply_grades(p: Pick, labels: list[str], spot_now: float,
-                  low: float | None, today: dt.date) -> int:
+                  extreme: float | None, today: dt.date) -> int:
     n = 0
     for label in labels:
         on = today if label == "expiry" else dt.date.fromisoformat(p.picked_on) + dt.timedelta(days=int(label))
         on = min(on, today)
-        p.grades[label] = grade_one(p, label, spot_now, low, on)
+        p.grades[label] = grade_one(p, label, spot_now, extreme, on)
         n += 1
     return n
 
@@ -301,21 +338,24 @@ def grade(picks: list[Pick], provider: DataProvider,
         try:
             info = provider.underlying(p.ticker)
             spot_now = info.spot
-            low = provider.history_lows(p.ticker, dt.date.fromisoformat(p.picked_on))
+            since = dt.date.fromisoformat(p.picked_on)
+            extreme = (provider.history_highs(p.ticker, since) if is_call(p)
+                       else provider.history_lows(p.ticker, since))
         except Exception as exc:
             p.grades.setdefault("error", str(exc))
             continue
-        added += _apply_grades(p, labels, spot_now, low, today)
+        added += _apply_grades(p, labels, spot_now, extreme, today)
     return added
 
 
 def grade_with_quotes(picks: list[Pick], quotes: dict[str, dict],
                       today: dt.date | None = None) -> int:
     """Same as grade(), but prices come from a caller-supplied
-    {ticker: {"spot": x, "low_since": y}} — for environments that can reach
-    a quote feed but not a Python data provider (the scheduled routines
-    fetch these from TradingView). Picks whose ticker is missing are left
-    for next time."""
+    {ticker: {"spot": x, "low_since": y, "high_since": z}} — for environments
+    that can reach a quote feed but not a Python data provider (the scheduled
+    routines fetch these from TradingView). Short puts read low_since and
+    short calls read high_since; supply whichever the pick needs. Picks whose
+    ticker is missing are left for next time."""
     today = today or dt.date.today()
     added = 0
     for p in picks:
@@ -323,9 +363,9 @@ def grade_with_quotes(picks: list[Pick], quotes: dict[str, dict],
         q = quotes.get(p.ticker)
         if not labels or not q or q.get("spot") in (None, 0):
             continue
-        low = q.get("low_since")
+        extreme = q.get("high_since") if is_call(p) else q.get("low_since")
         added += _apply_grades(p, labels, float(q["spot"]),
-                               float(low) if low is not None else None, today)
+                               float(extreme) if extreme is not None else None, today)
     return added
 
 
@@ -365,6 +405,7 @@ def scorecard(picks: list[Pick]) -> dict:
         "by_horizon": by_h,
         "by_signal": breakdown(lambda p: p.signals or ["(none)"]),
         "by_sector": breakdown(lambda p: [p.sector or "other"]),
+        "by_strategy": breakdown(lambda p: [p.strategy or "short put"]),
         "by_source": breakdown(lambda p: [p.source]),
         "tickers": Counter(p.ticker for p in picks).most_common(10),
     }
@@ -427,7 +468,8 @@ def main(argv=None) -> int:
         n = record(picks, path)
         print(f"recorded {n} new pick(s) -> {path}")
         for p in picks:
-            print(f"  {p.picked_on} {p.ticker:6s} {p.strike:g}P exp {p.expiry}  score {p.score:g}")
+            side = "C" if is_call(p) else "P"
+            print(f"  {p.picked_on} {p.ticker:6s} {p.strike:g}{side} exp {p.expiry}  score {p.score:g}")
     elif a.cmd == "grade":
         picks = load(path)
         if a.quotes:
