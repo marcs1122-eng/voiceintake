@@ -31,11 +31,12 @@ sigPull    = input.bool(false, "Pullback-to-ribbon dots",    group=gS)
 sigSqueeze = input.bool(false, "Ribbon squeeze marks",       group=gS)
 sigExt     = input.bool(false, "Overextension warning",      group=gS)
 needTrend  = input.bool(false, "Stack must agree with trend EMA", group=gS)
-// On a 5m chart these EMAs cross constantly. confirmBars makes the stack
-// prove itself before it prints; cooldown stops a cluster of arrows on the
-// same swing. Raise both on fast timeframes, drop to 1/0 on the daily.
-confirmBars = input.int(3,  "Bars the stack must hold", minval=1, maxval=20, group=gS)
-cooldown    = input.int(20, "Min bars between arrows",  minval=0, maxval=200, group=gS)
+// "3 bars" means 15 minutes on a 5m chart and 3 days on a daily, so a fixed
+// bar count cannot behave the same on both. Auto derives them from the chart's
+// own timeframe, which is what makes this usable everywhere. Untick to override.
+autoTune    = input.bool(true, "Auto-tune signals to the timeframe", group=gS)
+confirmIn   = input.int(3,  "  Bars the stack must hold", minval=1, maxval=20, group=gS)
+cooldownIn  = input.int(20, "  Min bars between signals", minval=0, maxval=500, group=gS)
 sqzLook     = input.int(100, "Squeeze lookback", minval=20, group=gS)
 extMult     = input.float(3.0, "Overextended at (ATR from mid EMA)", minval=0.5, step=0.5, group=gS)
 
@@ -48,6 +49,15 @@ e3 = ta.ema(src, len3)
 e4 = ta.ema(src, len4)
 eT = ta.ema(src, lenTrend)
 atr = ta.atr(14)
+
+// Faster charts need more proof and a longer wait; a daily bar is already
+// a lot of evidence, so it barely needs either. Roughly two hours of cooldown
+// intraday, a few bars on the daily and above.
+tfSec = timeframe.in_seconds()
+autoConfirm = tfSec <=   60 ? 4 : tfSec <=  300 ? 3 : tfSec <=  900 ? 3 : tfSec <= 3600 ? 2 : tfSec <= 14400 ? 2 : 1
+autoCool    = tfSec <=   60 ? 60 : tfSec <=  300 ? 24 : tfSec <=  900 ? 16 : tfSec <= 3600 ? 10 : tfSec <= 14400 ? 6 : 3
+confirmBars = autoTune ? autoConfirm : confirmIn
+cooldown    = autoTune ? autoCool    : cooldownIn
 
 // Stack: every EMA in order. This is the real signal -- e1 > e4 alone can be
 // true while the middle two are tangled, which is chop, not trend.
@@ -95,15 +105,31 @@ if bearFire
 // Far better entry than chasing the stack arrow.
 pullBullRaw = bullStack and low  <= e2 and close > e4
 pullBearRaw = bearStack and high >= e2 and close < e4
-pullBull = pullBullRaw and not pullBullRaw[1]
-pullBear = pullBearRaw and not pullBearRaw[1]
+pullBullNew = pullBullRaw and not pullBullRaw[1]
+pullBearNew = pullBearRaw and not pullBearRaw[1]
+var int lastPullB = -100000
+var int lastPullS = -100000
+pullBull = pullBullNew and (bar_index - lastPullB) >= cooldown
+pullBear = pullBearNew and (bar_index - lastPullS) >= cooldown
+if pullBull
+    lastPullB := bar_index
+if pullBear
+    lastPullS := bar_index
 
 // Overextension: price stretched far from the ribbon. Not a reversal call --
 // a "do not chase, and if you sell premium this is your side" flag.
 extUp = dist >=  extMult
 extDn = dist <= -extMult
-extUpFire = extUp and not extUp[1]
-extDnFire = extDn and not extDn[1]
+extUpNew = extUp and not extUp[1]
+extDnNew = extDn and not extDn[1]
+var int lastExtU = -100000
+var int lastExtD = -100000
+extUpFire = extUpNew and (bar_index - lastExtU) >= cooldown
+extDnFire = extDnNew and (bar_index - lastExtD) >= cooldown
+if extUpFire
+    lastExtU := bar_index
+if extDnFire
+    lastExtD := bar_index
 
 // ═══════════════════════════════════════════════════════════════
 // PLOTS
