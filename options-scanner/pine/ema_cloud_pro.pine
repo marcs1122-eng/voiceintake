@@ -26,14 +26,18 @@ cBear = input.color(#FF1744, "Bearish", group=gV, inline="c")
 cMix  = input.color(#78909C, "Mixed",   group=gV, inline="c")
 
 gS = "Signals"
-sigStack   = input.bool(true,  "Perfect-stack arrows",      group=gS)
-sigPull    = input.bool(true,  "Pullback-to-ribbon entries", group=gS)
-sigSqueeze = input.bool(true,  "Ribbon squeeze shading",    group=gS)
-sigExt     = input.bool(true,  "Overextension warning",     group=gS)
+sigStack   = input.bool(true,  "Perfect-stack arrows",       group=gS)
+sigPull    = input.bool(false, "Pullback-to-ribbon dots",    group=gS)
+sigSqueeze = input.bool(false, "Ribbon squeeze marks",       group=gS)
+sigExt     = input.bool(false, "Overextension warning",      group=gS)
 needTrend  = input.bool(false, "Stack must agree with trend EMA", group=gS)
-sqzLook    = input.int(100, "Squeeze lookback",  minval=20, group=gS)
-sqzPct     = input.int(20,  "Squeeze percentile", minval=1, maxval=50, group=gS)
-extMult    = input.float(3.0, "Overextended at (ATR from mid EMA)", minval=0.5, step=0.5, group=gS)
+// On a 5m chart these EMAs cross constantly. confirmBars makes the stack
+// prove itself before it prints; cooldown stops a cluster of arrows on the
+// same swing. Raise both on fast timeframes, drop to 1/0 on the daily.
+confirmBars = input.int(3,  "Bars the stack must hold", minval=1, maxval=20, group=gS)
+cooldown    = input.int(20, "Min bars between arrows",  minval=0, maxval=200, group=gS)
+sqzLook     = input.int(100, "Squeeze lookback", minval=20, group=gS)
+extMult     = input.float(3.0, "Overextended at (ATR from mid EMA)", minval=0.5, step=0.5, group=gS)
 
 // ═══════════════════════════════════════════════════════════════
 // CALCULATIONS
@@ -65,12 +69,27 @@ loE   = math.min(e1, e2, e3, e4)
 width = atr > 0 ? (hiE - loE) / atr : 0.0          // ribbon thickness in ATRs
 dist  = atr > 0 ? (src - e3) / atr : 0.0           // price distance from mid EMA
 
-sqzLevel = ta.percentile_nearest_rank(width, sqzLook, sqzPct)
-squeeze  = width <= sqzLevel
+// A percentile threshold is the wrong tool here: "lowest 20% of the last 100
+// bars" is true on 20% of bars BY CONSTRUCTION, forever, whatever the market
+// does. It cannot mark an extreme because it fires at a fixed rate. A new
+// lookback low in ribbon width is a real compression event and is rare.
+sqzFloor = ta.lowest(width, sqzLook)[1]
+squeeze  = not na(sqzFloor) and width <= sqzFloor
 
 // ── Signals ────────────────────────────────────────────────────
-bullFire = bullStack and not bullStack[1] and okBull
-bearFire = bearStack and not bearStack[1] and okBear
+bullHeld = bullStack and nz(ta.barssince(not bullStack), 0) >= confirmBars - 1
+bearHeld = bearStack and nz(ta.barssince(not bearStack), 0) >= confirmBars - 1
+bullRaw  = bullHeld and not bullHeld[1] and okBull
+bearRaw  = bearHeld and not bearHeld[1] and okBear
+
+var int lastBull = -100000
+var int lastBear = -100000
+bullFire = bullRaw and (bar_index - lastBull) >= cooldown
+bearFire = bearRaw and (bar_index - lastBear) >= cooldown
+if bullFire
+    lastBull := bar_index
+if bearFire
+    lastBear := bar_index
 
 // Pullback: trend intact, price dips into the ribbon and holds the slow EMA.
 // Far better entry than chasing the stack arrow.
@@ -117,7 +136,7 @@ fill(p1, p4, color = layered ? na : color.new(cloudBase, t2), title="Cloud singl
 
 barcolor(colorBars ? (score == 3 ? cBull : score == 0 ? cBear : na) : na, title="Bar colour")
 
-bgcolor(sigSqueeze and squeeze ? color.new(#FFEB3B, 92) : na, title="Squeeze")
+plotshape(sigSqueeze and squeeze, "Squeeze", shape.square, location.bottom, #FFEB3B, size=size.tiny)
 
 plotshape(sigStack and bullFire, "Bull stack", shape.triangleup,   location.belowbar, cBull, text="STACK", textcolor=cBull, size=size.small)
 plotshape(sigStack and bearFire, "Bear stack", shape.triangledown, location.abovebar, cBear, text="STACK", textcolor=cBear, size=size.small)
@@ -140,7 +159,7 @@ if showPanel and barstate.islast
     stackCol = score == 3 ? cBull : score == 0 ? cBear : cMix
     trendTxt = not useTrend ? "off" : src > eT ? "above " + str.tostring(lenTrend) : "below " + str.tostring(lenTrend)
     trendCol = not useTrend ? cMix : src > eT ? cBull : cBear
-    stateTxt = squeeze ? "SQUEEZE - expansion due" : width > sqzLevel * 2 ? "expanded" : "normal"
+    stateTxt = squeeze ? "SQUEEZE - expansion due" : str.tostring(width, "#.##") + " ATR wide"
     stateCol = squeeze ? #FFEB3B : cMix
     distTxt  = str.tostring(dist, "#.##") + " ATR"
     distCol  = math.abs(dist) >= extMult ? #FF9800 : cMix
