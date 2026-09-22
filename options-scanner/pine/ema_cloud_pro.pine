@@ -1,0 +1,166 @@
+//@version=5
+// EMA Cloud 5-12-22-55 Pro
+// A layered EMA ribbon with stack, pullback, squeeze and overextension signals.
+indicator("EMA Cloud 5-12-22-55 Pro", shorttitle="EMA Cloud Pro", overlay=true)
+
+// ═══════════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════════
+gE = "EMAs"
+len1  = input.int(5,   "Fast",        minval=1, group=gE, inline="a")
+len2  = input.int(12,  "",            minval=1, group=gE, inline="a")
+len3  = input.int(22,  "",            minval=1, group=gE, inline="a")
+len4  = input.int(55,  "Slow",        minval=1, group=gE, inline="a")
+src        = input.source(close, "Source", group=gE)
+useTrend   = input.bool(true, "Show trend EMA", group=gE, inline="t")
+lenTrend   = input.int(200, "", minval=1, group=gE, inline="t")
+
+gV = "Look"
+style      = input.string("Layered", "Cloud", options=["Layered", "Single"], group=gV)
+baseTransp = input.int(80, "Cloud transparency", minval=0, maxval=100, group=gV)
+colorBars  = input.bool(true, "Color bars by stack", group=gV)
+showPanel  = input.bool(true, "Info panel", group=gV, inline="p")
+panelPos   = input.string("Top Right", "", options=["Top Right","Top Left","Bottom Right","Bottom Left"], group=gV, inline="p")
+cBull = input.color(#00E676, "Bullish", group=gV, inline="c")
+cBear = input.color(#FF1744, "Bearish", group=gV, inline="c")
+cMix  = input.color(#78909C, "Mixed",   group=gV, inline="c")
+
+gS = "Signals"
+sigStack   = input.bool(true,  "Perfect-stack arrows",      group=gS)
+sigPull    = input.bool(true,  "Pullback-to-ribbon entries", group=gS)
+sigSqueeze = input.bool(true,  "Ribbon squeeze shading",    group=gS)
+sigExt     = input.bool(true,  "Overextension warning",     group=gS)
+needTrend  = input.bool(false, "Stack must agree with trend EMA", group=gS)
+sqzLook    = input.int(100, "Squeeze lookback",  minval=20, group=gS)
+sqzPct     = input.int(20,  "Squeeze percentile", minval=1, maxval=50, group=gS)
+extMult    = input.float(3.0, "Overextended at (ATR from mid EMA)", minval=0.5, step=0.5, group=gS)
+
+// ═══════════════════════════════════════════════════════════════
+// CALCULATIONS
+// ═══════════════════════════════════════════════════════════════
+e1 = ta.ema(src, len1)
+e2 = ta.ema(src, len2)
+e3 = ta.ema(src, len3)
+e4 = ta.ema(src, len4)
+eT = ta.ema(src, lenTrend)
+atr = ta.atr(14)
+
+// Stack: every EMA in order. This is the real signal -- e1 > e4 alone can be
+// true while the middle two are tangled, which is chop, not trend.
+bullStack = e1 > e2 and e2 > e3 and e3 > e4
+bearStack = e1 < e2 and e2 < e3 and e3 < e4
+
+// How many of the three adjacent pairs are in bullish order (0-3).
+// Gives the cloud a sense of trend HEALTH instead of a binary flip.
+score = (e1 > e2 ? 1 : 0) + (e2 > e3 ? 1 : 0) + (e3 > e4 ? 1 : 0)
+
+trendUp   = not useTrend or src > eT
+trendDn   = not useTrend or src < eT
+okBull    = not needTrend or trendUp
+okBear    = not needTrend or trendDn
+
+// Ribbon geometry
+hiE   = math.max(e1, e2, e3, e4)
+loE   = math.min(e1, e2, e3, e4)
+width = atr > 0 ? (hiE - loE) / atr : 0.0          // ribbon thickness in ATRs
+dist  = atr > 0 ? (src - e3) / atr : 0.0           // price distance from mid EMA
+
+sqzLevel = ta.percentile_nearest_rank(width, sqzLook, sqzPct)
+squeeze  = width <= sqzLevel
+
+// ── Signals ────────────────────────────────────────────────────
+bullFire = bullStack and not bullStack[1] and okBull
+bearFire = bearStack and not bearStack[1] and okBear
+
+// Pullback: trend intact, price dips into the ribbon and holds the slow EMA.
+// Far better entry than chasing the stack arrow.
+pullBullRaw = bullStack and low  <= e2 and close > e4
+pullBearRaw = bearStack and high >= e2 and close < e4
+pullBull = pullBullRaw and not pullBullRaw[1]
+pullBear = pullBearRaw and not pullBearRaw[1]
+
+// Overextension: price stretched far from the ribbon. Not a reversal call --
+// a "do not chase, and if you sell premium this is your side" flag.
+extUp = dist >=  extMult
+extDn = dist <= -extMult
+extUpFire = extUp and not extUp[1]
+extDnFire = extDn and not extDn[1]
+
+// ═══════════════════════════════════════════════════════════════
+// PLOTS
+// ═══════════════════════════════════════════════════════════════
+col1 = #FFA726
+col2 = #EF5350
+col3 = #42A5F5
+col4 = #26C6DA
+
+p1 = plot(e1, "EMA fast", color=col1, linewidth=2)
+p2 = plot(e2, "EMA 2",    color=col2, linewidth=2)
+p3 = plot(e3, "EMA 3",    color=col3, linewidth=2)
+p4 = plot(e4, "EMA slow", color=col4, linewidth=2)
+plot(useTrend ? eT : na, "Trend EMA", color=#FFD54F, linewidth=3)
+
+// Cloud colour tracks the stack score, so a tangled ribbon greys out instead
+// of showing a confident green.
+cloudBase = score == 3 ? cBull : score == 0 ? cBear : cMix
+fade      = score == 3 or score == 0 ? 0 : 8
+
+t1 = math.max(0, math.min(100, baseTransp - 14 + fade))
+t2 = math.max(0, math.min(100, baseTransp -  7 + fade))
+t3 = math.max(0, math.min(100, baseTransp      + fade))
+
+layered = style == "Layered"
+fill(p1, p2, color = layered ? color.new(cloudBase, t1) : na, title="Cloud inner")
+fill(p2, p3, color = layered ? color.new(cloudBase, t2) : na, title="Cloud mid")
+fill(p3, p4, color = layered ? color.new(cloudBase, t3) : na, title="Cloud outer")
+fill(p1, p4, color = layered ? na : color.new(cloudBase, t2), title="Cloud single")
+
+barcolor(colorBars ? (score == 3 ? cBull : score == 0 ? cBear : na) : na, title="Bar colour")
+
+bgcolor(sigSqueeze and squeeze ? color.new(#FFEB3B, 92) : na, title="Squeeze")
+
+plotshape(sigStack and bullFire, "Bull stack", shape.triangleup,   location.belowbar, cBull, text="STACK", textcolor=cBull, size=size.small)
+plotshape(sigStack and bearFire, "Bear stack", shape.triangledown, location.abovebar, cBear, text="STACK", textcolor=cBear, size=size.small)
+plotshape(sigPull and pullBull, "Bull pullback", shape.circle, location.belowbar, color.new(cBull, 25), size=size.tiny)
+plotshape(sigPull and pullBear, "Bear pullback", shape.circle, location.abovebar, color.new(cBear, 25), size=size.tiny)
+plotshape(sigExt and extUpFire, "Overextended up",   shape.xcross, location.abovebar, #FF9800, size=size.tiny)
+plotshape(sigExt and extDnFire, "Overextended down", shape.xcross, location.belowbar, #FF9800, size=size.tiny)
+
+// ═══════════════════════════════════════════════════════════════
+// INFO PANEL
+// ═══════════════════════════════════════════════════════════════
+pos = panelPos == "Top Right" ? position.top_right : panelPos == "Top Left" ? position.top_left : panelPos == "Bottom Right" ? position.bottom_right : position.bottom_left
+
+var table panel = table.new(pos, 2, 5, border_width=1, frame_width=1, frame_color=#37474F, border_color=#37474F)
+
+if showPanel and barstate.islast
+    stackTxt = score == 3 ? "BULL - all 4 stacked" : score == 0 ? "BEAR - all 4 stacked" : "MIXED (" + str.tostring(score) + "/3)"
+    stackCol = score == 3 ? cBull : score == 0 ? cBear : cMix
+    trendTxt = not useTrend ? "off" : src > eT ? "above " + str.tostring(lenTrend) : "below " + str.tostring(lenTrend)
+    trendCol = not useTrend ? cMix : src > eT ? cBull : cBear
+    stateTxt = squeeze ? "SQUEEZE - expansion due" : width > sqzLevel * 2 ? "expanded" : "normal"
+    stateCol = squeeze ? #FFEB3B : cMix
+    distTxt  = str.tostring(dist, "#.##") + " ATR"
+    distCol  = math.abs(dist) >= extMult ? #FF9800 : cMix
+
+    table.cell(panel, 0, 0, "EMA CLOUD",  text_color=#ECEFF1, bgcolor=#263238, text_size=size.small)
+    table.cell(panel, 1, 0, timeframe.period, text_color=#ECEFF1, bgcolor=#263238, text_size=size.small)
+    table.cell(panel, 0, 1, "Stack",  text_color=#90A4AE, bgcolor=#1B262C, text_size=size.small)
+    table.cell(panel, 1, 1, stackTxt, text_color=stackCol, bgcolor=#1B262C, text_size=size.small)
+    table.cell(panel, 0, 2, "Trend",  text_color=#90A4AE, bgcolor=#1B262C, text_size=size.small)
+    table.cell(panel, 1, 2, trendTxt, text_color=trendCol, bgcolor=#1B262C, text_size=size.small)
+    table.cell(panel, 0, 3, "Ribbon", text_color=#90A4AE, bgcolor=#1B262C, text_size=size.small)
+    table.cell(panel, 1, 3, stateTxt, text_color=stateCol, bgcolor=#1B262C, text_size=size.small)
+    table.cell(panel, 0, 4, "From mid", text_color=#90A4AE, bgcolor=#1B262C, text_size=size.small)
+    table.cell(panel, 1, 4, distTxt,  text_color=distCol, bgcolor=#1B262C, text_size=size.small)
+
+// ═══════════════════════════════════════════════════════════════
+// ALERTS
+// ═══════════════════════════════════════════════════════════════
+alertcondition(bullFire,  "Bullish perfect stack", "All EMAs stacked bullish on {{ticker}} {{interval}}")
+alertcondition(bearFire,  "Bearish perfect stack", "All EMAs stacked bearish on {{ticker}} {{interval}}")
+alertcondition(pullBull,  "Bullish pullback",      "Pullback into the ribbon in an uptrend on {{ticker}} {{interval}}")
+alertcondition(pullBear,  "Bearish pullback",      "Pullback into the ribbon in a downtrend on {{ticker}} {{interval}}")
+alertcondition(squeeze and not squeeze[1], "Ribbon squeeze", "EMA ribbon compressed on {{ticker}} {{interval}} - expansion due")
+alertcondition(extUpFire, "Overextended up",       "Price stretched far above the ribbon on {{ticker}} {{interval}}")
+alertcondition(extDnFire, "Overextended down",     "Price stretched far below the ribbon on {{ticker}} {{interval}}")
