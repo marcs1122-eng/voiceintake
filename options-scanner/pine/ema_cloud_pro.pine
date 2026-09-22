@@ -131,7 +131,9 @@ plotshape(sigExt and extDnFire, "Overextended down", shape.xcross, location.belo
 // ═══════════════════════════════════════════════════════════════
 pos = panelPos == "Top Right" ? position.top_right : panelPos == "Top Left" ? position.top_left : panelPos == "Bottom Right" ? position.bottom_right : position.bottom_left
 
-var table panel = table.new(pos, 2, 5, border_width=1, frame_width=1, frame_color=#37474F, border_color=#37474F)
+// Created only when the panel is on -- an unfilled table still draws its
+// frame, which would leave an empty box in the corner when it is switched off.
+var table panel = showPanel ? table.new(pos, 2, 5, border_width=1, frame_width=1, frame_color=#37474F, border_color=#37474F) : na
 
 if showPanel and barstate.islast
     stackTxt = score == 3 ? "BULL - all 4 stacked" : score == 0 ? "BEAR - all 4 stacked" : "MIXED (" + str.tostring(score) + "/3)"
