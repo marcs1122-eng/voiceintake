@@ -25,6 +25,14 @@ cBear = input.color(#FF1744, "Bearish", group=gV, inline="c")
 cMix  = input.color(#90A4AE, "Neutral", group=gV, inline="c")
 cWarn = input.color(#FFA726, "Warning", group=gV, inline="c")
 
+// RSI is display-only. It reads close on its own, so nothing in the EMA
+// section changes it and it changes nothing above.
+gR = "RSI"
+showRsi = input.bool(true, "Show RSI row", group=gR)
+rsiLen  = input.int(14, "Length", minval=2, group=gR)
+rsiLow  = input.float(35, "Red at or below",  group=gR, inline="r")
+rsiHigh = input.float(50, "Green above", group=gR, inline="r")
+
 // ═══════════════════════════════════════════════════════════════
 // CALCULATIONS
 // ═══════════════════════════════════════════════════════════════
@@ -34,6 +42,8 @@ e3  = ta.ema(src, len3)
 e4  = ta.ema(src, len4)
 eT  = ta.ema(src, lenTrend)
 atr = ta.atr(14)
+// Same Wilder RSI(14) on close as TradingView's built-in RSI and the scanner.
+rsi = ta.rsi(close, rsiLen)
 
 // How many of the three adjacent pairs are in bullish order (0-3).
 // 3 = perfect bull stack, 0 = perfect bear stack, anything else is tangled.
@@ -57,7 +67,7 @@ plot(na, "hidden", display=display.none)
 pos = panelPos == "Top Right" ? position.top_right : panelPos == "Top Left" ? position.top_left : panelPos == "Bottom Right" ? position.bottom_right : position.bottom_left
 ts  = txtSize == "Tiny" ? size.tiny : txtSize == "Small" ? size.small : txtSize == "Normal" ? size.normal : size.large
 
-var table panel = table.new(pos, 2, 5, border_width=1, frame_width=1, frame_color=#37474F, border_color=#37474F)
+var table panel = table.new(pos, 2, 7, border_width=1, frame_width=1, frame_color=#37474F, border_color=#37474F)
 
 cell(r, label, txt, col) =>
     table.cell(panel, 0, r, label, text_color=#90A4AE, bgcolor=#1B262C, text_size=ts, text_halign=text.align_left)
@@ -87,3 +97,10 @@ if barstate.islast
     cell(2, "Trend",    trendTxt, trendCol)
     cell(3, "Ribbon",   ribTxt,   ribCol)
     cell(4, "From mid", midTxt,   midCol)
+
+    // Spacer row keeps RSI visibly apart from the EMA readings.
+    if showRsi
+        table.cell(panel, 0, 5, "", bgcolor=#263238, text_size=size.tiny, height=0.4)
+        table.cell(panel, 1, 5, "", bgcolor=#263238, text_size=size.tiny, height=0.4)
+        rsiCol = rsi <= rsiLow ? cBear : rsi > rsiHigh ? cBull : cMix
+        cell(6, "RSI " + str.tostring(rsiLen), str.tostring(rsi, "#.0"), rsiCol)
