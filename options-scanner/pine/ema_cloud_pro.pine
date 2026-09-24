@@ -122,7 +122,8 @@ sqzFloor = ta.lowest(width, sqzLook)[1]
 squeeze  = not na(sqzFloor) and width <= sqzFloor
 
 // Bigger picture: the same stack test one timeframe up -- daily on intraday
-// charts, weekly on the daily.
+// charts, weekly on the daily, monthly on the weekly. There is nothing useful
+// above a monthly chart, so the row hides there.
 htf     = timeframe.isintraday ? "D" : timeframe.isdaily ? "W" : "M"
 htfName = timeframe.isintraday ? "Daily" : timeframe.isdaily ? "Weekly" : "Monthly"
 htfScore = request.security(syminfo.tickerid, htf, stackScore(close))
@@ -294,7 +295,7 @@ if boxOn and barstate.islast
              "This bar's volume vs the last " + str.tostring(volLen) + " bars. A bar still in progress is projected to a full bar, so early in the day it's a guess.")
         r += 1
 
-    if rowHtf
+    if rowHtf and not timeframe.ismonthly
         cell(r, htfName, stackWord(htfScore), stackCol(htfScore),
              "The same stack test on the " + htfName + " chart. Trades that agree with it work better.")
         r += 1
