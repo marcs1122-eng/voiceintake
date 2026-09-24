@@ -9,11 +9,12 @@ Settings). Set them once, save them as a template, apply everywhere.
   Wicks the same colour as the body, not grey -- wicks are where support and
   resistance show up, so they need to be as visible as the bodies.
 - **Color bars based on previous close: off.**
-- Session: **Regular trading hours** (intraday). Pre-market is thin and draws
-  fake highs and lows.
+- Session: **Regular trading hours** for stocks (intraday). Pre-market is thin
+  and draws fake highs and lows. Futures (/NQ, /GC...) trade nearly 24h -- keep
+  extended hours on for those.
 
 ## 2. Canvas tab -- remove the noise
-- Background: solid, `#131722`.
+- Background: solid black, `#000000` (or `#0D0D0D` if pure black is harsh).
 - **Grid lines: off, both.** Horizontal grid lines look like price levels and
   hide the real ones. This is the biggest single fix.
 - Watermark: off.
@@ -48,6 +49,7 @@ New chart: open Chart settings -> Template -> Clean.
 
 ## Where the EMA box fits
 Use `ema_cloud_pro.pine` (Pine Editor -> New -> paste -> Save -> Add to chart)
-and set **Show -> Box only**. Nothing is drawn on the chart, including the
-"Color bars by stack" recolouring, so the clean candle colours above stay put.
+and set **Show -> Box only**. The only thing drawn is the yellow 200 EMA line
+(untick "Show trend EMA" to hide it) -- no cloud, no arrows, and no "Color bars
+by stack" recolouring, so the clean candle colours above stay put.
 Switch to **Full chart** for the cloud and arrows. Alerts work either way.

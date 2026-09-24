@@ -9,7 +9,7 @@ indicator("EMA Cloud 5-12-22-55 Pro", shorttitle="EMA Cloud Pro", overlay=true)
 // ═══════════════════════════════════════════════════════════════
 gM = "Mode"
 mode = input.string("Box only", "Show", options=["Box only", "Full chart"], group=gM,
-     tooltip="Box only: nothing drawn on the chart. Full chart: cloud, lines and arrows too, using the switches below. Alerts work in both.")
+     tooltip="Box only: the box plus the 200 EMA line (untick Show trend EMA to hide it). Full chart: cloud, lines and arrows too, using the switches below. Alerts work in both.")
 full = mode == "Full chart"
 
 gE = "EMAs"
@@ -188,7 +188,7 @@ if extDnFire
     lastExtD := bar_index
 
 // ═══════════════════════════════════════════════════════════════
-// PLOTS -- all na in "Box only", so nothing reaches the chart
+// PLOTS -- all na in "Box only" except the trend line
 // ═══════════════════════════════════════════════════════════════
 col1 = #FFA726
 col2 = #EF5350
@@ -199,7 +199,9 @@ p1 = plot(full ? e1 : na, "EMA fast", color=col1, linewidth=2)
 p2 = plot(full ? e2 : na, "EMA 2",    color=col2, linewidth=2)
 p3 = plot(full ? e3 : na, "EMA 3",    color=col3, linewidth=2)
 p4 = plot(full ? e4 : na, "EMA slow", color=col4, linewidth=2)
-plot(full and useTrend ? eT : na, "Trend EMA", color=#FFD54F, linewidth=3)
+// The trend line is the one line worth keeping on a clean chart, so it follows
+// its own switch in both modes.
+plot(useTrend ? eT : na, "Trend EMA", color=#FFD54F, linewidth=full ? 3 : 2)
 
 // Cloud colour tracks the stack score, so a tangled ribbon greys out instead
 // of showing a confident green.
