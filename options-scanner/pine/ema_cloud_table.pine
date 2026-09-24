@@ -1,0 +1,89 @@
+//@version=5
+// EMA Cloud Table
+// Just the info box from EMA Cloud Pro -- nothing is drawn on the chart. Same
+// math, so the numbers match the full version exactly.
+indicator("EMA Cloud Table", shorttitle="EMA Table", overlay=true)
+
+// ═══════════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════════
+gE = "EMAs"
+len1     = input.int(5,   "Fast", minval=1, group=gE, inline="a")
+len2     = input.int(12,  "",     minval=1, group=gE, inline="a")
+len3     = input.int(22,  "",     minval=1, group=gE, inline="a")
+len4     = input.int(55,  "Slow", minval=1, group=gE, inline="a")
+lenTrend = input.int(200, "Trend EMA", minval=1, group=gE)
+src      = input.source(close, "Source", group=gE)
+
+gV = "Table"
+panelPos = input.string("Top Right", "Position", options=["Top Right","Top Left","Bottom Right","Bottom Left"], group=gV)
+txtSize  = input.string("Small", "Text size", options=["Tiny","Small","Normal","Large"], group=gV)
+extMult  = input.float(3.0, "Stretched at (ATR from mid)", minval=0.5, step=0.5, group=gV)
+sqzLook  = input.int(100, "Squeeze lookback (bars)", minval=20, group=gV)
+cBull = input.color(#00E676, "Bullish", group=gV, inline="c")
+cBear = input.color(#FF1744, "Bearish", group=gV, inline="c")
+cMix  = input.color(#90A4AE, "Neutral", group=gV, inline="c")
+cWarn = input.color(#FFA726, "Warning", group=gV, inline="c")
+
+// ═══════════════════════════════════════════════════════════════
+// CALCULATIONS
+// ═══════════════════════════════════════════════════════════════
+e1  = ta.ema(src, len1)
+e2  = ta.ema(src, len2)
+e3  = ta.ema(src, len3)
+e4  = ta.ema(src, len4)
+eT  = ta.ema(src, lenTrend)
+atr = ta.atr(14)
+
+// How many of the three adjacent pairs are in bullish order (0-3).
+// 3 = perfect bull stack, 0 = perfect bear stack, anything else is tangled.
+score = (e1 > e2 ? 1 : 0) + (e2 > e3 ? 1 : 0) + (e3 > e4 ? 1 : 0)
+
+width = atr > 0 ? (math.max(e1, e2, e3, e4) - math.min(e1, e2, e3, e4)) / atr : 0.0
+dist  = atr > 0 ? (src - e3) / atr : 0.0
+
+// A raw ATR width means different things on a 5m SPY and a daily ARM, so the
+// word next to it compares the cloud to its OWN typical width on this chart.
+widthMed = ta.percentile_nearest_rank(width, sqzLook, 50)
+sqzFloor = ta.lowest(width, sqzLook)[1]
+squeeze  = not na(sqzFloor) and width <= sqzFloor
+
+// Pine wants at least one output; this one is invisible everywhere.
+plot(na, "hidden", display=display.none)
+
+// ═══════════════════════════════════════════════════════════════
+// TABLE
+// ═══════════════════════════════════════════════════════════════
+pos = panelPos == "Top Right" ? position.top_right : panelPos == "Top Left" ? position.top_left : panelPos == "Bottom Right" ? position.bottom_right : position.bottom_left
+ts  = txtSize == "Tiny" ? size.tiny : txtSize == "Small" ? size.small : txtSize == "Normal" ? size.normal : size.large
+
+var table panel = table.new(pos, 2, 5, border_width=1, frame_width=1, frame_color=#37474F, border_color=#37474F)
+
+cell(r, label, txt, col) =>
+    table.cell(panel, 0, r, label, text_color=#90A4AE, bgcolor=#1B262C, text_size=ts, text_halign=text.align_left)
+    table.cell(panel, 1, r, txt,   text_color=col,     bgcolor=#1B262C, text_size=ts, text_halign=text.align_left)
+
+if barstate.islast
+    stackTxt = score == 3 ? "BULL - all 4 in order" : score == 0 ? "BEAR - all 4 in order" : "MIXED " + str.tostring(score) + "/3 - chop"
+    stackCol = score == 3 ? cBull : score == 0 ? cBear : cMix
+
+    trendTxt = src > eT ? "above " + str.tostring(lenTrend) : "below " + str.tostring(lenTrend)
+    trendCol = src > eT ? cBull : cBear
+
+    ratio    = na(widthMed) or widthMed <= 0 ? 1.0 : width / widthMed
+    ribWord  = squeeze ? "SQUEEZE - move coming" : ratio < 0.6 ? "tight - quiet" : ratio > 1.6 ? "wide - trending hard" : "normal"
+    ribTxt   = str.tostring(width, "#.#") + " ATR  " + ribWord
+    ribCol   = squeeze ? #FFEB3B : ratio > 1.6 ? (score >= 2 ? cBull : cBear) : cMix
+
+    side     = dist >= 0 ? "above" : "below"
+    far      = math.abs(dist) >= extMult
+    midWord  = far ? "STRETCHED - don't chase" : math.abs(dist) < 1 ? "near the cloud" : "ok"
+    midTxt   = str.tostring(math.abs(dist), "#.#") + " ATR " + side + "  " + midWord
+    midCol   = far ? cWarn : cMix
+
+    table.cell(panel, 0, 0, "EMA CLOUD",      text_color=#ECEFF1, bgcolor=#263238, text_size=ts)
+    table.cell(panel, 1, 0, timeframe.period, text_color=#ECEFF1, bgcolor=#263238, text_size=ts)
+    cell(1, "Stack",    stackTxt, stackCol)
+    cell(2, "Trend",    trendTxt, trendCol)
+    cell(3, "Ribbon",   ribTxt,   ribCol)
+    cell(4, "From mid", midTxt,   midCol)
