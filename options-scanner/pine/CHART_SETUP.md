@@ -46,7 +46,8 @@ New chart: open Chart settings -> Template -> Clean.
   highs, lows and closes it shows are not real prices, so levels drawn off it
   are wrong.
 
-## Where the EMA table fits
-Add `ema_cloud_table.pine` (Pine Editor -> New -> paste -> Save -> Add to chart).
-**Remove** EMA Cloud Pro from that chart -- its "Color bars by stack" recolours
-the candles and overrides the clean colours above.
+## Where the EMA box fits
+Use `ema_cloud_pro.pine` (Pine Editor -> New -> paste -> Save -> Add to chart)
+and set **Show -> Box only**. Nothing is drawn on the chart, including the
+"Color bars by stack" recolouring, so the clean candle colours above stay put.
+Switch to **Full chart** for the cloud and arrows. Alerts work either way.
