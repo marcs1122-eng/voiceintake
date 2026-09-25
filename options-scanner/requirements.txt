@@ -1,0 +1,5 @@
+yfinance>=0.2.40
+pandas>=2.0
+streamlit>=1.32
+pytest>=7.0
+tastytrade>=13.0   # live data incl. futures options + positions (needs API creds)
