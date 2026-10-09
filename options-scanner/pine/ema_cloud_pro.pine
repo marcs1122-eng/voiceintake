@@ -1,0 +1,331 @@
+//@version=5
+// EMA Cloud 5-12-22-55 Pro
+// A layered EMA ribbon with an info box. "Show" picks between the box alone and
+// the full chart -- one indicator either way. Alerts fire in both modes.
+indicator("EMA Cloud 5-12-22-55 Pro", shorttitle="EMA Cloud Pro", overlay=true)
+
+// ═══════════════════════════════════════════════════════════════
+// INPUTS
+// ═══════════════════════════════════════════════════════════════
+gM = "Mode"
+mode = input.string("Box only", "Show", options=["Box only", "Full chart"], group=gM,
+     tooltip="Box only: the box plus the 200 EMA line (untick Show trend EMA to hide it). Full chart: cloud, lines and arrows too, using the switches below. Alerts work in both.")
+full = mode == "Full chart"
+
+gE = "EMAs"
+len1  = input.int(5,   "Fast",        minval=1, group=gE, inline="a")
+len2  = input.int(12,  "",            minval=1, group=gE, inline="a")
+len3  = input.int(22,  "",            minval=1, group=gE, inline="a")
+len4  = input.int(55,  "Slow",        minval=1, group=gE, inline="a")
+src        = input.source(close, "Source", group=gE)
+useTrend   = input.bool(true, "Show trend EMA", group=gE, inline="t")
+lenTrend   = input.int(200, "", minval=1, group=gE, inline="t")
+
+gB = "Box"
+panelPos = input.string("Top Right", "Position", options=["Top Right","Top Left","Bottom Right","Bottom Left"], group=gB)
+txtSize  = input.string("Small", "Text size", options=["Tiny","Small","Normal","Large"], group=gB)
+rowTrend = input.bool(true, "200 EMA",   group=gB, inline="b1")
+row55    = input.bool(true, "55 EMA",    group=gB, inline="b1")
+rowRib   = input.bool(true, "Ribbon",    group=gB, inline="b2")
+rowPrice = input.bool(true, "Price",     group=gB, inline="b2")
+rowVol   = input.bool(true, "Volume",    group=gB, inline="b3")
+rowHtf   = input.bool(true, "Bigger picture", group=gB, inline="b3")
+rowRsi   = input.bool(true, "RSI",       group=gB, inline="b4")
+rowEarn  = input.bool(true, "Earnings",  group=gB, inline="b4")
+
+// RSI is display-only. It reads close on its own, so nothing in the EMA
+// section changes it and it changes nothing else.
+gR = "RSI"
+rsiLen  = input.int(14, "Length", minval=2, group=gR)
+rsiLow  = input.float(35, "Red at or below", group=gR, inline="r")
+rsiHigh = input.float(50, "Green above",     group=gR, inline="r")
+
+gVol = "Volume"
+volLen   = input.int(20, "Average of last", minval=2, group=gVol, inline="v")
+volHeavy = input.float(1.5, "Heavy at (x avg)", minval=1.0, step=0.1, group=gVol, inline="v")
+
+gV = "Full chart look"
+style      = input.string("Layered", "Cloud", options=["Layered", "Single"], group=gV)
+baseTransp = input.int(80, "Cloud transparency", minval=0, maxval=100, group=gV)
+colorBars  = input.bool(true, "Color bars by stack", group=gV)
+showPanel  = input.bool(true, "Show the box in full chart mode", group=gV)
+cBull = input.color(#00E676, "Bullish", group=gV, inline="c")
+cBear = input.color(#FF1744, "Bearish", group=gV, inline="c")
+cMix  = input.color(#90A4AE, "Neutral", group=gV, inline="c")
+cWarn = #FFA726
+cSqz  = #FFEB3B
+
+gS = "Signals (full chart)"
+sigStack   = input.bool(true,  "Perfect-stack arrows",       group=gS)
+sigPull    = input.bool(false, "Pullback-to-ribbon dots",    group=gS)
+sigSqueeze = input.bool(false, "Ribbon squeeze marks",       group=gS)
+sigExt     = input.bool(false, "Overextension warning",      group=gS)
+needTrend  = input.bool(false, "Stack must agree with trend EMA", group=gS)
+// "3 bars" means 15 minutes on a 5m chart and 3 days on a daily, so a fixed
+// bar count cannot behave the same on both. Auto derives them from the chart's
+// own timeframe, which is what makes this usable everywhere. Untick to override.
+autoTune    = input.bool(true, "Auto-tune signals to the timeframe", group=gS)
+confirmIn   = input.int(3,  "  Bars the stack must hold", minval=1, maxval=20, group=gS)
+cooldownIn  = input.int(20, "  Min bars between signals", minval=0, maxval=500, group=gS)
+sqzLook     = input.int(100, "Squeeze lookback", minval=20, group=gS)
+extMult     = input.float(3.0, "Stretched at (ATR from mid EMA)", minval=0.5, step=0.5, group=gS)
+
+// ═══════════════════════════════════════════════════════════════
+// CALCULATIONS
+// ═══════════════════════════════════════════════════════════════
+e1 = ta.ema(src, len1)
+e2 = ta.ema(src, len2)
+e3 = ta.ema(src, len3)
+e4 = ta.ema(src, len4)
+eT = ta.ema(src, lenTrend)
+atr = ta.atr(14)
+
+// Faster charts need more proof and a longer wait; a daily bar is already
+// a lot of evidence, so it barely needs either. Roughly two hours of cooldown
+// intraday, a few bars on the daily and above.
+tfSec = timeframe.in_seconds()
+autoConfirm = tfSec <=   60 ? 4 : tfSec <=  300 ? 3 : tfSec <=  900 ? 3 : tfSec <= 3600 ? 2 : tfSec <= 14400 ? 2 : 1
+autoCool    = tfSec <=   60 ? 60 : tfSec <=  300 ? 24 : tfSec <=  900 ? 16 : tfSec <= 3600 ? 10 : tfSec <= 14400 ? 6 : 3
+confirmBars = autoTune ? autoConfirm : confirmIn
+cooldown    = autoTune ? autoCool    : cooldownIn
+
+// Stack: every EMA in order. This is the real signal -- e1 > e4 alone can be
+// true while the middle two are tangled, which is chop, not trend.
+bullStack = e1 > e2 and e2 > e3 and e3 > e4
+bearStack = e1 < e2 and e2 < e3 and e3 < e4
+
+// How many of the three adjacent pairs are in bullish order (0-3).
+// Gives the cloud a sense of trend HEALTH instead of a binary flip.
+stackScore(s) =>
+    (ta.ema(s, len1) > ta.ema(s, len2) ? 1 : 0) + (ta.ema(s, len2) > ta.ema(s, len3) ? 1 : 0) + (ta.ema(s, len3) > ta.ema(s, len4) ? 1 : 0)
+score = (e1 > e2 ? 1 : 0) + (e2 > e3 ? 1 : 0) + (e3 > e4 ? 1 : 0)
+
+trendUp   = not useTrend or src > eT
+trendDn   = not useTrend or src < eT
+okBull    = not needTrend or trendUp
+okBear    = not needTrend or trendDn
+
+// Ribbon geometry
+hiE   = math.max(e1, e2, e3, e4)
+loE   = math.min(e1, e2, e3, e4)
+width = atr > 0 ? (hiE - loE) / atr : 0.0          // ribbon thickness in ATRs
+dist  = atr > 0 ? (src - e3) / atr : 0.0           // price distance from mid EMA
+
+// A raw ATR width means different things on a 5m SPY and a daily ARM, so the
+// box compares the cloud to its OWN typical width on this chart.
+widthMed = ta.percentile_nearest_rank(width, sqzLook, 50)
+
+// A percentile threshold is the wrong tool for the squeeze: "lowest 20% of the
+// last 100 bars" is true on 20% of bars BY CONSTRUCTION, forever, whatever the
+// market does. A new lookback low in ribbon width is a real compression event.
+sqzFloor = ta.lowest(width, sqzLook)[1]
+squeeze  = not na(sqzFloor) and width <= sqzFloor
+
+// Bigger picture: the same stack test one timeframe up -- daily on intraday
+// charts, weekly on the daily, monthly on the weekly. There is nothing useful
+// above a monthly chart, so the row hides there.
+htf     = timeframe.isintraday ? "D" : timeframe.isdaily ? "W" : "M"
+htfName = timeframe.isintraday ? "Daily" : timeframe.isdaily ? "Weekly" : "Monthly"
+htfScore = request.security(syminfo.tickerid, htf, stackScore(close))
+
+// Same Wilder RSI(14) on close as TradingView's built-in RSI and the scanner.
+rsi = ta.rsi(close, rsiLen)
+
+// A bar still in progress only has part of its volume, so it would read
+// "light" all morning. Project it to a full bar from the time elapsed; in the
+// first 10% of a bar that guess is too noisy, so use the last finished bar.
+volAvg  = ta.sma(volume, volLen)[1]
+elapsed = barstate.isrealtime and not na(time_close) and time_close > time ? math.min(1.0, math.max(0.0, (timenow - time) / (time_close - time))) : 1.0
+volNow  = elapsed >= 0.1 ? volume / elapsed : volume[1]
+volX    = volAvg > 0 ? volNow / volAvg : na
+
+// Days until the next earnings report. na for ETFs, futures and anything
+// TradingView has no date for.
+earnDays = na(earnings.future_time) ? na : (earnings.future_time - timenow) / 86400000.0
+
+// ── Signals ────────────────────────────────────────────────────
+bullHeld = bullStack and nz(ta.barssince(not bullStack), 0) >= confirmBars - 1
+bearHeld = bearStack and nz(ta.barssince(not bearStack), 0) >= confirmBars - 1
+bullRaw  = bullHeld and not bullHeld[1] and okBull
+bearRaw  = bearHeld and not bearHeld[1] and okBear
+
+var int lastBull = -100000
+var int lastBear = -100000
+bullFire = bullRaw and (bar_index - lastBull) >= cooldown
+bearFire = bearRaw and (bar_index - lastBear) >= cooldown
+if bullFire
+    lastBull := bar_index
+if bearFire
+    lastBear := bar_index
+
+// Pullback: trend intact, price dips into the ribbon and holds the slow EMA.
+// Far better entry than chasing the stack arrow.
+pullBullRaw = bullStack and low  <= e2 and close > e4
+pullBearRaw = bearStack and high >= e2 and close < e4
+pullBullNew = pullBullRaw and not pullBullRaw[1]
+pullBearNew = pullBearRaw and not pullBearRaw[1]
+var int lastPullB = -100000
+var int lastPullS = -100000
+pullBull = pullBullNew and (bar_index - lastPullB) >= cooldown
+pullBear = pullBearNew and (bar_index - lastPullS) >= cooldown
+if pullBull
+    lastPullB := bar_index
+if pullBear
+    lastPullS := bar_index
+
+// Overextension: price stretched far from the ribbon. Not a reversal call --
+// a "do not chase, and if you sell premium this is your side" flag.
+extUp = dist >=  extMult
+extDn = dist <= -extMult
+extUpNew = extUp and not extUp[1]
+extDnNew = extDn and not extDn[1]
+var int lastExtU = -100000
+var int lastExtD = -100000
+extUpFire = extUpNew and (bar_index - lastExtU) >= cooldown
+extDnFire = extDnNew and (bar_index - lastExtD) >= cooldown
+if extUpFire
+    lastExtU := bar_index
+if extDnFire
+    lastExtD := bar_index
+
+// ═══════════════════════════════════════════════════════════════
+// PLOTS -- all na in "Box only" except the trend line
+// ═══════════════════════════════════════════════════════════════
+col1 = #FFA726
+col2 = #EF5350
+col3 = #42A5F5
+col4 = #26C6DA
+
+p1 = plot(full ? e1 : na, "EMA fast", color=col1, linewidth=2)
+p2 = plot(full ? e2 : na, "EMA 2",    color=col2, linewidth=2)
+p3 = plot(full ? e3 : na, "EMA 3",    color=col3, linewidth=2)
+p4 = plot(full ? e4 : na, "EMA slow", color=col4, linewidth=2)
+// The trend line is the one line worth keeping on a clean chart, so it follows
+// its own switch in both modes.
+plot(useTrend ? eT : na, "Trend EMA", color=#FFD54F, linewidth=full ? 3 : 2)
+
+// Cloud colour tracks the stack score, so a tangled ribbon greys out instead
+// of showing a confident green.
+cloudBase = score == 3 ? cBull : score == 0 ? cBear : cMix
+fade      = score == 3 or score == 0 ? 0 : 8
+
+t1 = math.max(0, math.min(100, baseTransp - 14 + fade))
+t2 = math.max(0, math.min(100, baseTransp -  7 + fade))
+t3 = math.max(0, math.min(100, baseTransp      + fade))
+
+layered = style == "Layered"
+fill(p1, p2, color = full and layered ? color.new(cloudBase, t1) : na, title="Cloud inner")
+fill(p2, p3, color = full and layered ? color.new(cloudBase, t2) : na, title="Cloud mid")
+fill(p3, p4, color = full and layered ? color.new(cloudBase, t3) : na, title="Cloud outer")
+fill(p1, p4, color = full and not layered ? color.new(cloudBase, t2) : na, title="Cloud single")
+
+barcolor(full and colorBars ? (score == 3 ? cBull : score == 0 ? cBear : na) : na, title="Bar colour")
+
+plotshape(full and sigSqueeze and squeeze, "Squeeze", shape.square, location.bottom, cSqz, size=size.tiny)
+
+plotshape(full and sigStack and bullFire, "Bull stack", shape.triangleup,   location.belowbar, cBull, text="STACK", textcolor=cBull, size=size.small)
+plotshape(full and sigStack and bearFire, "Bear stack", shape.triangledown, location.abovebar, cBear, text="STACK", textcolor=cBear, size=size.small)
+plotshape(full and sigPull and pullBull, "Bull pullback", shape.circle, location.belowbar, color.new(cBull, 25), size=size.tiny)
+plotshape(full and sigPull and pullBear, "Bear pullback", shape.circle, location.abovebar, color.new(cBear, 25), size=size.tiny)
+plotshape(full and sigExt and extUpFire, "Overextended up",   shape.xcross, location.abovebar, cWarn, size=size.tiny)
+plotshape(full and sigExt and extDnFire, "Overextended down", shape.xcross, location.belowbar, cWarn, size=size.tiny)
+
+// ═══════════════════════════════════════════════════════════════
+// INFO BOX -- every row is a plain word, colour does the talking.
+// Hover any row for what it means and the number behind it.
+// ═══════════════════════════════════════════════════════════════
+boxOn = not full or showPanel
+pos = panelPos == "Top Right" ? position.top_right : panelPos == "Top Left" ? position.top_left : panelPos == "Bottom Right" ? position.bottom_right : position.bottom_left
+ts  = txtSize == "Tiny" ? size.tiny : txtSize == "Small" ? size.small : txtSize == "Normal" ? size.normal : size.large
+
+// Created only when the box is on -- an unfilled table still draws its frame,
+// which would leave an empty box in the corner when it is switched off.
+var table panel = boxOn ? table.new(pos, 2, 12, border_width=1, frame_width=1, frame_color=#37474F, border_color=#37474F) : na
+
+cell(r, label, txt, col, tip) =>
+    table.cell(panel, 0, r, label, text_color=#90A4AE, bgcolor=#1B262C, text_size=ts, text_halign=text.align_left, tooltip=tip)
+    table.cell(panel, 1, r, txt,   text_color=col,     bgcolor=#1B262C, text_size=ts, text_halign=text.align_left, tooltip=tip)
+
+stackWord(s) => s == 3 ? "BULLISH" : s == 0 ? "BEARISH" : "CHOP"
+stackCol(s)  => s == 3 ? cBull : s == 0 ? cBear : cMix
+
+if boxOn and barstate.islast
+    table.cell(panel, 0, 0, "EMA CLOUD",      text_color=#ECEFF1, bgcolor=#263238, text_size=ts)
+    table.cell(panel, 1, 0, timeframe.period, text_color=#ECEFF1, bgcolor=#263238, text_size=ts)
+    r = 1
+
+    cell(r, "Stack", score == 3 ? "BULLISH - all 4 lined up" : score == 0 ? "BEARISH - all 4 lined up" : "CHOP - tangled", stackCol(score),
+         "Are the 4 EMAs in order? All up = bullish, all down = bearish, mixed = chop. " + str.tostring(score) + " of 3 pairs point up.")
+    r += 1
+
+    if rowTrend
+        up = src > eT
+        cell(r, str.tostring(lenTrend) + " EMA", up ? "ABOVE - bullish" : "BELOW - bearish", up ? cBull : cBear,
+             "Price vs the " + str.tostring(lenTrend) + " EMA, the long-term trend line.")
+        r += 1
+
+    if row55
+        up = src > e4
+        cell(r, str.tostring(len4) + " EMA", up ? "ABOVE - bullish" : "BELOW - bearish", up ? cBull : cBear,
+             "Price vs the " + str.tostring(len4) + " EMA, the bottom edge of the cloud on this chart.")
+        r += 1
+
+    if rowRib
+        ratio = na(widthMed) or widthMed <= 0 ? 1.0 : width / widthMed
+        txt = squeeze ? "SQUEEZE - big move coming" : ratio > 1.6 ? "STRONG - trend has power" : ratio < 0.6 ? "QUIET - coiling" : "NORMAL"
+        col = squeeze ? cSqz : ratio > 1.6 ? (score >= 2 ? cBull : cBear) : cMix
+        cell(r, "Ribbon", txt, col,
+             "How spread out the cloud is compared with normal for this chart. Wide = strong trend, narrow = quiet, squeeze = tightest in " + str.tostring(sqzLook) + " bars. Now " + str.tostring(ratio, "#.#") + "x its usual width.")
+        r += 1
+
+    if rowPrice
+        a = math.abs(dist)
+        txt = dist >= extMult ? "STRETCHED UP - don't chase" : dist <= -extMult ? "STRETCHED DOWN - bounce watch" : a < 1 ? (score == 3 ? "AT CLOUD - pullback buy zone" : score == 0 ? "AT CLOUD - sellers waiting" : "IN CLOUD - no edge") : dist > 0 ? "ABOVE CLOUD - bullish" : "BELOW CLOUD - bearish"
+        col = a >= extMult ? cWarn : a < 1 ? (score == 3 ? cBull : score == 0 ? cBear : cMix) : dist > 0 ? cBull : cBear
+        cell(r, "Price", txt, col,
+             "Where price sits vs the middle of the cloud. Far above = don't chase; far below = oversold, watch for a bounce. " + str.tostring(dist, "#.#") + " ATR from the middle.")
+        r += 1
+
+    if rowVol
+        heavy = not na(volX) and volX >= volHeavy
+        light = not na(volX) and volX < 0.7
+        txt = na(volX) ? "no data" : heavy ? "HEAVY " + str.tostring(volX, "#.#") + "x - " + (close >= open ? "buyers" : "sellers") : light ? "LIGHT - no conviction" : "NORMAL"
+        col = heavy ? (close >= open ? cBull : cBear) : cMix
+        cell(r, "Volume", txt, col,
+             "This bar's volume vs the last " + str.tostring(volLen) + " bars. A bar still in progress is projected to a full bar, so early in the day it's a guess.")
+        r += 1
+
+    if rowHtf and not timeframe.ismonthly
+        cell(r, htfName, stackWord(htfScore), stackCol(htfScore),
+             "The same stack test on the " + htfName + " chart. Trades that agree with it work better.")
+        r += 1
+
+    if rowRsi or rowEarn
+        // Spacer row keeps RSI and earnings visibly apart from the trend readings.
+        table.cell(panel, 0, r, "", bgcolor=#263238, text_size=size.tiny, height=0.4)
+        table.cell(panel, 1, r, "", bgcolor=#263238, text_size=size.tiny, height=0.4)
+        r += 1
+
+    if rowRsi
+        cell(r, "RSI " + str.tostring(rsiLen), str.tostring(rsi, "#.0"), rsi <= rsiLow ? cBear : rsi > rsiHigh ? cBull : cMix,
+             "Red at or below " + str.tostring(rsiLow) + ", green above " + str.tostring(rsiHigh) + ". Display only.")
+        r += 1
+
+    if rowEarn
+        d = na(earnDays) ? na : math.max(0, math.round(earnDays))
+        txt = na(d) ? "none scheduled" : d <= 7 ? str.tostring(d) + " days - NO NEW TRADES" : str.tostring(d) + " days"
+        col = na(d) ? cMix : d <= 7 ? cBear : d <= 14 ? cWarn : cMix
+        cell(r, "Earnings", txt, col,
+             "Days to the next earnings report. Red inside 7 calendar days, about 5 trading days. Always confirm the date -- TradingView's can be wrong.")
+        r += 1
+
+// ═══════════════════════════════════════════════════════════════
+// ALERTS -- fire in both modes
+// ═══════════════════════════════════════════════════════════════
+alertcondition(bullFire,  "Bullish perfect stack", "All EMAs stacked bullish on {{ticker}} {{interval}}")
+alertcondition(bearFire,  "Bearish perfect stack", "All EMAs stacked bearish on {{ticker}} {{interval}}")
+alertcondition(pullBull,  "Bullish pullback",      "Pullback into the ribbon in an uptrend on {{ticker}} {{interval}}")
+alertcondition(pullBear,  "Bearish pullback",      "Pullback into the ribbon in a downtrend on {{ticker}} {{interval}}")
+alertcondition(squeeze and not squeeze[1], "Ribbon squeeze", "EMA ribbon compressed on {{ticker}} {{interval}} - expansion due")
+alertcondition(extUpFire, "Overextended up",       "Price stretched far above the ribbon on {{ticker}} {{interval}}")
+alertcondition(extDnFire, "Overextended down",     "Price stretched far below the ribbon on {{ticker}} {{interval}}")
