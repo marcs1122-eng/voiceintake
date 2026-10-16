@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+*.csv
+
+# Rendered briefs and scan sheets. The routines write these on every run and
+# ship them over chat/email -- they are output, not source, and committing
+# them would churn the repo daily.
+out/
+# Live quote cache written during grading.
+quotes.json
